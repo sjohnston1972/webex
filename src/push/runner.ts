@@ -61,14 +61,14 @@ export async function startPush(env: Env, projectId: string, batchId: string): P
 
   for (const item of [...people, ...groups]) {
     const jobId = uuid();
-    const isPerson = item.target_type === "person";
+    const firstWave = item.target_type === "person" || item.target_type === "workspace";
     await env.DB.prepare(
       "INSERT INTO push_jobs (id, batch_id, batch_item_id, action, status) VALUES (?, ?, ?, 'push', ?)",
     )
-      .bind(jobId, batchId, item.id, isPerson ? "pending" : "waiting")
+      .bind(jobId, batchId, item.id, firstWave ? "pending" : "waiting")
       .run();
     await env.DB.prepare("UPDATE batch_items SET push_status = 'queued' WHERE id = ?").bind(item.id).run();
-    if (isPerson) {
+    if (firstWave) {
       await env.PUSH_QUEUE.send({ jobId });
       queued++;
     }
