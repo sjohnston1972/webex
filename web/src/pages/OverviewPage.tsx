@@ -5,7 +5,7 @@ import type { ProjectContext } from "../App";
 import { useEffect, useState } from "react";
 
 // What each tile shows when clicked: where to fetch and which columns to render.
-type TileSpec = { title: string; fetch: (projectId: string) => string; columns: { key: string; label: string; render?: (row: any) => unknown }[] };
+type TileSpec = { title: string; fetch: (projectId: string) => string; columns: { key: string; label: string; render?: (row: any) => unknown }[]; kind?: "greetings" };
 
 const personName = (row: any) => {
   const p = JSON.parse(row.target_payload);
@@ -62,7 +62,7 @@ const TILE_SPECS: Record<string, TileSpec> = {
     { key: "extension", label: "Extension" },
     { key: "email", label: "Email" },
   ] },
-  vm_greetings: { title: "Greeting files", fetch: (id) => `/api/projects/${id}/objects/vm_greetings`, columns: [
+  vm_greetings: { title: "Greeting files", kind: "greetings", fetch: (id) => `/api/projects/${id}/objects/vm_greetings`, columns: [
     { key: "filename", label: "File" },
     { key: "matched_alias", label: "Matched mailbox" },
   ] },
@@ -93,9 +93,12 @@ function eligibleSpec(targetType: string, label: string): TileSpec {
 function TileModal({ projectId, spec, onClose }: { projectId: string; spec: TileSpec; onClose: () => void }) {
   const [rows, setRows] = useState<any[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [playing, setPlaying] = useState<any | null>(null);
   useEffect(() => {
     api.get<any[]>(spec.fetch(projectId)).then(setRows).catch((e) => setError(e.message));
   }, [projectId, spec]);
+
+  const audioUrl = (row: any) => `/api/projects/${projectId}/greetings/${row.id}/audio`;
 
   return (
     <Modal title={spec.title} onClose={onClose} xl>
@@ -108,7 +111,10 @@ function TileModal({ projectId, spec, onClose }: { projectId: string; spec: Tile
         <div className="scroll-y" style={{ maxHeight: "56vh" }}>
           <table className="data">
             <thead>
-              <tr>{spec.columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
+              <tr>
+                {spec.columns.map((c) => <th key={c.key}>{c.label}</th>)}
+                {spec.kind === "greetings" && <th style={{ width: 130 }}>Audio</th>}
+              </tr>
             </thead>
             <tbody>
               {rows.map((r, i) => (
@@ -116,10 +122,44 @@ function TileModal({ projectId, spec, onClose }: { projectId: string; spec: Tile
                   {spec.columns.map((c) => (
                     <td key={c.key} className="small">{String((c.render ? c.render(r) : r[c.key]) ?? "—")}</td>
                   ))}
+                  {spec.kind === "greetings" && (
+                    <td>
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <button className="btn sm" onClick={() => setPlaying(r)} title="Play in browser">
+                          ▶ Play
+                        </button>
+                        <a className="btn sm" href={`${audioUrl(r)}?download`} title="Download WAV">
+                          ⤓
+                        </a>
+                      </span>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {playing && (
+        <div className="scrim" style={{ zIndex: 60 }} onClick={(e) => e.target === e.currentTarget && setPlaying(null)}>
+          <div className="player-card">
+            <div className="player-glyph">♪</div>
+            <div className="player-title">{playing.filename}</div>
+            <div className="player-sub">
+              {playing.matched_alias ? `mailbox: ${playing.matched_alias}` : "no matched mailbox"} · Unity greeting
+            </div>
+            <audio controls autoPlay src={audioUrl(playing)} style={{ width: "100%", marginTop: 14 }} />
+            <div className="toolbar" style={{ marginTop: 14 }}>
+              <a className="btn sm" href={`${audioUrl(playing)}?download`}>
+                ⤓ Download
+              </a>
+              <div className="grow" />
+              <button className="btn sm" onClick={() => setPlaying(null)}>
+                Close
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </Modal>

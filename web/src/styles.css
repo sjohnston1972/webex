@@ -238,6 +238,33 @@ td.notes { color: var(--ink-soft); font-size: 12px; max-width: 360px; }
 .pin-input:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(46,133,64,0.15); }
 .landing-foot { margin-top: 22px; font-size: 11px; color: var(--ink-faint); text-align: center; }
 
+/* ── Greeting player ───────────────────────────────────────────────── */
+.player-card {
+  background: var(--surface);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  width: 380px;
+  max-width: calc(100vw - 40px);
+  padding: 26px 26px 18px;
+  text-align: left;
+  animation: rise 0.2s ease;
+}
+.player-glyph {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--green-tint);
+  color: var(--green-deep);
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.player-title { font-weight: 600; font-size: 15px; font-family: var(--font-mono); }
+.player-sub { color: var(--ink-faint); font-size: 12px; margin-top: 2px; }
+.player-card audio { accent-color: var(--green); }
+
 /* ── AI chat ───────────────────────────────────────────────────────── */
 .chat-pill {
   display: inline-flex;

@@ -159,6 +159,21 @@ async function storeGreeting(env: Env, projectId: string, snapshotId: string, fi
   return alias !== null;
 }
 
+// Stream a greeting WAV from R2 (inline for the player, attachment for download).
+ingest.get("/:id/greetings/:greetingId/audio", async (c) => {
+  const row = await c.env.DB.prepare("SELECT r2_key, filename FROM src_vm_greetings WHERE id = ? AND project_id = ?")
+    .bind(c.req.param("greetingId"), c.req.param("id"))
+    .first<{ r2_key: string; filename: string }>();
+  if (!row) return c.json({ error: "greeting not found" }, 404);
+  const obj = await c.env.UPLOADS.get(row.r2_key);
+  if (!obj) return c.json({ error: "audio file missing from storage" }, 404);
+  const headers: Record<string, string> = { "Content-Type": "audio/wav", "Cache-Control": "private, max-age=300" };
+  if (c.req.query("download") !== undefined) {
+    headers["Content-Disposition"] = `attachment; filename="${row.filename.replace(/[^\w.\- ]+/g, "_")}"`;
+  }
+  return new Response(obj.body, { headers });
+});
+
 // List parsed source objects for review tables.
 const OBJECT_TABLES: Record<string, string> = {
   users: "src_users",
