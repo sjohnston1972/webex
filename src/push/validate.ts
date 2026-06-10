@@ -1,5 +1,5 @@
 import type { Env } from "../env";
-import { WebexClient } from "../webex/client";
+import { pickCallingLicense, WebexClient } from "../webex/client";
 
 type ItemRow = {
   id: string;
@@ -28,9 +28,7 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
   const locations = await client.listLocations();
   const locationByName = new Map(locations.map((l: any) => [String(l.name).toLowerCase(), l]));
   const licenses = await client.listLicenses();
-  const callingLicense = licenses.find(
-    (l: any) => /webex calling/i.test(l.name) && (l.totalUnits === undefined || l.consumedUnits < l.totalUnits),
-  );
+  const callingLicense = pickCallingLicense(licenses);
   const numbers = await client.listNumbers();
   const numberByE164 = new Map(numbers.map((n: any) => [n.phoneNumber, n]));
   const extensionsInUse = new Set(numbers.filter((n: any) => n.owner).map((n: any) => String(n.extension ?? "")));

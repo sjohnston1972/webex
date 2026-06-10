@@ -162,7 +162,8 @@ export class WebexClient {
   }
 
   async listLocations(): Promise<any[]> {
-    const r = await this.request("GET", "/locations", undefined, { max: "1000" });
+    // The locations API rejects max > 500.
+    const r = await this.request("GET", "/locations", undefined, { max: "500" });
     return r.items ?? [];
   }
 
@@ -213,6 +214,17 @@ export class WebexClient {
       messageStorage: { mwiEnabled: true, storageType: "INTERNAL" },
     });
   }
+}
+
+/** Pick the licence used for migrated people: prefer Calling Professional, never Workspaces/Hot-desk. */
+export function pickCallingLicense(licenses: any[]): any | undefined {
+  const usable = licenses.filter(
+    (l: any) =>
+      /webex calling/i.test(l.name) &&
+      !/workspaces|hot desk/i.test(l.name) &&
+      (l.totalUnits === undefined || l.consumedUnits < l.totalUnits),
+  );
+  return usable.find((l: any) => /professional/i.test(l.name)) ?? usable[0];
 }
 
 function safeJson(text: string): unknown {

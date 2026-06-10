@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { nowIso, uuid } from "../lib/util";
-import { WebexClient } from "../webex/client";
+import { pickCallingLicense, WebexClient } from "../webex/client";
 
 // Push order: people first; hunt groups / pickup groups only after every
 // person job in the batch has finished (members must exist). Rollback runs
@@ -185,7 +185,7 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     }
     const loc = await resolveLocation();
     const licenses = await client.listLicenses();
-    const calling = licenses.find((l: any) => /webex calling/i.test(l.name) && (l.totalUnits === undefined || l.consumedUnits < l.totalUnits));
+    const calling = pickCallingLicense(licenses);
     if (!calling) throw new Error("No Webex Calling licence with available units");
 
     const body: Record<string, unknown> = {
