@@ -35,7 +35,7 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
 
   try {
     // Replace previous AXL-sourced rows for this project.
-    const srcTables = ["src_users", "src_phones", "src_lines", "src_hunt_pilots", "src_hunt_members", "src_pickup_groups", "src_trans_patterns"];
+    const srcTables = ["src_users", "src_phones", "src_lines", "src_hunt_pilots", "src_hunt_members", "src_pickup_groups", "src_trans_patterns", "src_dialplan"];
     for (const table of srcTables) {
       await env.DB.prepare(
         `DELETE FROM ${table} WHERE project_id = ? AND snapshot_id IN
@@ -219,6 +219,69 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
       }),
     );
     counts.pickup_groups = pickups.length;
+
+    // Full dial plan — CUCM's "Route Plan Report" is the numplan table joined
+    // to its usage type; one query captures every pattern in the system.
+    const dialplanStmts: D1PreparedStatement[] = [];
+    const addDialplan = (objectType: string, name: string, partition: string | null, description: string | null, detail: string | null, raw: unknown) => {
+      dialplanStmts.push(
+        env.DB.prepare(
+          `INSERT INTO src_dialplan (id, project_id, snapshot_id, object_type, name, partition_name, description, detail, raw_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(uuid(), projectId, snapshotId, objectType, name, partition, description, detail, JSON.stringify(raw)),
+      );
+    };
+    const USAGE_TYPES: Record<string, string> = {
+      Device: "directory_number",
+      Route: "route_pattern",
+      Translation: "translation_pattern",
+      "Hunt Pilot": "hunt_pilot",
+      "Call Pick Up Group": "pickup_group_number",
+      CallPark: "call_park",
+      "Message Waiting": "message_waiting",
+      "Domain Routing": "sip_route_pattern",
+      "Emergency Location ID Number": "elin",
+      "Centralized Conference Number": "conference",
+      "Meet-Me Conference": "meet_me",
+      "Device template": "device_template",
+    };
+    try {
+      const rows = await axl.sql(
+        `select n.dnorpattern as pattern, tpu.name as usage, rp.name as pname, n.description as descr
+         from numplan n
+         join typepatternusage tpu on n.tkpatternusage = tpu.enum
+         left join routepartition rp on n.fkroutepartition = rp.pkid`,
+      );
+      for (const r of rows) {
+        const usage = text(r.usage);
+        addDialplan(USAGE_TYPES[usage] ?? usage.toLowerCase().replace(/[^a-z0-9]+/g, "_"), text(r.pattern), text(r.pname) || null, text(r.descr) || null, `Route plan: ${usage}`, r);
+      }
+      counts.route_plan_patterns = rows.length;
+    } catch (e) {
+      warnings.push(`Route plan report query failed: ${e instanceof Error ? e.message : e}`);
+    }
+    // Supporting dial-plan infrastructure (not patterns, so not in numplan).
+    const infraPulls: [string, () => Promise<any[]>, (o: any) => [string, string | null, string | null, string | null]][] = [
+      ["route_partition", () => axl.listRoutePartitions(), (o) => [text(o.name), null, text(o.description) || null, null]],
+      ["css", () => axl.listCss(), (o) => [text(o.name), null, text(o.description) || null, text(o.clause) ? `Partitions: ${text(o.clause)}` : null]],
+      ["route_list", () => axl.listRouteLists(), (o) => [text(o.name), null, text(o.description) || null, null]],
+      ["route_group", () => axl.listRouteGroups(), (o) => [text(o.name), null, null, null]],
+      ["sip_trunk", () => axl.listSipTrunks(), (o) => [text(o.name), null, text(o.description) || null, null]],
+    ];
+    let infraCount = 0;
+    for (const [objectType, list, map] of infraPulls) {
+      try {
+        for (const obj of await list()) {
+          const [name, partition, description, detail] = map(obj);
+          addDialplan(objectType, name, partition, description, detail, obj);
+          infraCount++;
+        }
+      } catch (e) {
+        warnings.push(`${objectType} pull failed: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    counts.dialplan_infrastructure = infraCount;
+    await batchAll(env.DB, dialplanStmts);
 
     await env.DB.prepare(
       "UPDATE source_snapshots SET status = 'parsed', counts_json = ?, parsed_at = ?, error_text = ? WHERE id = ?",

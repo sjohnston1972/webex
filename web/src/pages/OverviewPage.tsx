@@ -13,6 +13,7 @@ const COUNT_LABELS: Record<string, string> = {
   pickup_groups: "Pickup groups",
   vm_boxes: "Unity mailboxes",
   trans_patterns: "Translation patterns",
+  dialplan: "Dial plan objects",
 };
 
 export function OverviewPage() {

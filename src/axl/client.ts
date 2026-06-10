@@ -181,6 +181,57 @@ export class AxlClient {
     return ensureArray(ret?.callPickupGroup);
   }
 
+  // --- dial plan (report-only objects) ---
+
+  async listRoutePartitions(): Promise<any[]> {
+    const ret = await this.request(
+      "listRoutePartition",
+      `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/></returnedTags>`,
+    );
+    return ensureArray(ret?.routePartition);
+  }
+
+  async listCss(): Promise<any[]> {
+    const ret = await this.request(
+      "listCss",
+      `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/><clause/></returnedTags>`,
+    );
+    return ensureArray(ret?.css);
+  }
+
+  async listRoutePatterns(): Promise<any[]> {
+    const ret = await this.request(
+      "listRoutePattern",
+      `<searchCriteria><pattern>%</pattern></searchCriteria>
+       <returnedTags><pattern/><description/><routePartitionName/><blockEnable/></returnedTags>`,
+    );
+    return ensureArray(ret?.routePattern);
+  }
+
+  async listRouteLists(): Promise<any[]> {
+    const ret = await this.request(
+      "listRouteList",
+      `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/></returnedTags>`,
+    );
+    return ensureArray(ret?.routeList);
+  }
+
+  async listRouteGroups(): Promise<any[]> {
+    const ret = await this.request(
+      "listRouteGroup",
+      `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/></returnedTags>`,
+    );
+    return ensureArray(ret?.routeGroup);
+  }
+
+  async listSipTrunks(): Promise<any[]> {
+    const ret = await this.request(
+      "listSipTrunk",
+      `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/></returnedTags>`,
+    );
+    return ensureArray(ret?.sipTrunk);
+  }
+
   /** Thin SQL escape hatch — used for pickup group membership. */
   async sql(query: string): Promise<any[]> {
     const ret = await this.request("executeSQLQuery", `<sql>${escapeXml(query)}</sql>`);

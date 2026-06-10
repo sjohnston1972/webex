@@ -6,3 +6,5 @@ dist/
 tunnel-token.txt
 dcloud-project-id.txt
 pilot-batch-id.txt
+enc-token.txt
+wx-token.txt

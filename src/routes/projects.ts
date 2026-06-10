@@ -11,6 +11,7 @@ const SRC_TABLES = [
   "src_pickup_groups",
   "src_vm_boxes",
   "src_trans_patterns",
+  "src_dialplan",
 ];
 
 export const projects = new Hono<AppContext>();

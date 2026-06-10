@@ -5,6 +5,7 @@ import { ProjectsPage } from "./pages/ProjectsPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { SourcePage } from "./pages/SourcePage";
 import { ReviewPage } from "./pages/ReviewPage";
+import { DialPlanPage } from "./pages/DialPlanPage";
 import { WebexPage } from "./pages/WebexPage";
 import { PushPage } from "./pages/PushPage";
 import { ReportsPage } from "./pages/ReportsPage";
@@ -15,9 +16,10 @@ const STAGES = [
   { path: "", step: "Overview", name: "Status" },
   { path: "source", step: "Stage 1", name: "Source" },
   { path: "review", step: "Stage 2", name: "Review & select" },
-  { path: "webex", step: "Stage 3", name: "Webex" },
-  { path: "push", step: "Stage 4", name: "Validate & push" },
-  { path: "reports", step: "Stage 5", name: "Reports" },
+  { path: "dialplan", step: "Stage 3", name: "Dial plan" },
+  { path: "webex", step: "Stage 4", name: "Webex" },
+  { path: "push", step: "Stage 5", name: "Validate & push" },
+  { path: "reports", step: "Stage 6", name: "Reports" },
 ];
 
 function Sidebar() {
@@ -123,6 +125,7 @@ export default function App() {
               <Route index element={<OverviewPage />} />
               <Route path="source" element={<SourcePage />} />
               <Route path="review" element={<ReviewPage />} />
+              <Route path="dialplan" element={<DialPlanPage />} />
               <Route path="webex" element={<WebexPage />} />
               <Route path="push" element={<PushPage />} />
               <Route path="reports" element={<ReportsPage />} />

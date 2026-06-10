@@ -130,6 +130,7 @@ const OBJECT_TABLES: Record<string, string> = {
   pickup_groups: "src_pickup_groups",
   vm_boxes: "src_vm_boxes",
   trans_patterns: "src_trans_patterns",
+  dialplan: "src_dialplan",
 };
 
 ingest.get("/:id/objects/:type", async (c) => {

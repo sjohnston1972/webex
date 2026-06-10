@@ -32,6 +32,17 @@ reports.get("/:id/reports/readiness.csv", async (c) => {
   );
 });
 
+// Full dial plan (CUCM Route Plan Report + supporting infrastructure).
+reports.get("/:id/reports/dialplan.csv", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    "SELECT object_type, name, partition_name, description, detail FROM src_dialplan WHERE project_id = ? ORDER BY object_type, name",
+  )
+    .bind(c.req.param("id"))
+    .all<{ object_type: string; name: string; partition_name: string | null; description: string | null; detail: string | null }>();
+  const rows = results.map((r) => [r.object_type, r.name, r.partition_name ?? "", r.description ?? "", r.detail ?? ""]);
+  return csvResponse("dial-plan-report.csv", toCsv(["Object type", "Pattern / Name", "Partition", "Description", "Detail"], rows));
+});
+
 reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT m.target_type, m.target_payload, bi.validate_status, bi.validate_notes
