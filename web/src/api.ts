@@ -48,6 +48,7 @@ export type Project = {
   created_at: string;
   user_count?: number;
   cucm_linked?: number;
+  unity_linked?: number;
   webex_connected?: number;
 };
 

@@ -688,5 +688,14 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   }
 
   await batchAll(env.DB, stmts);
+
+  // Re-apply user-forced voicemail choices to freshly regenerated rows.
+  await env.DB.prepare(
+    `UPDATE mappings SET target_payload = json_set(target_payload, '$.voicemail', json(CASE vm_override WHEN 1 THEN 'true' ELSE 'false' END))
+     WHERE project_id = ? AND target_type = 'person' AND vm_override IS NOT NULL AND status = 'auto'`,
+  )
+    .bind(projectId)
+    .run();
+
   return { generated: stmts.length };
 }

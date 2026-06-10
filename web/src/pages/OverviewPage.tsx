@@ -108,6 +108,20 @@ export function OverviewPage() {
               <Pill tone="grey">not configured</Pill>
             )}
           </dd>
+          <dt>Unity connection</dt>
+          <dd>
+            {summary.unity ? (
+              <>
+                <Pill tone={summary.unity.verified_at ? "green" : "amber"}>
+                  {summary.unity.verified_at ? `verified · Unity ${summary.unity.unity_version ?? "?"}` : "saved, not verified"}
+                </Pill>{" "}
+                <span className="mono small dim">{summary.unity.base_url}</span>
+                {(summary.counts.vm_boxes ?? 0) > 0 && <span className="dim small"> · {summary.counts.vm_boxes} mailboxes</span>}
+              </>
+            ) : (
+              <Pill tone="grey">not configured</Pill>
+            )}
+          </dd>
           <dt>Mappings</dt>
           <dd>
             {mapTotals.green + mapTotals.amber + mapTotals.red > 0 ? (

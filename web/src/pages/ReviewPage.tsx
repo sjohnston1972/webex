@@ -211,6 +211,29 @@ export function ReviewPage() {
             sub={`${rows.filter((r) => r.selected).length} of ${rows.length} selected`}
             actions={
               <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                {type === "person" && (
+                  <>
+                    <button
+                      className="btn sm"
+                      title="Provision voicemail for every person"
+                      onClick={async () => {
+                        await api.post(`/api/projects/${projectId}/mappings/bulk`, { action: "setVoicemail", voicemailEnabled: true });
+                        load();
+                      }}
+                    >
+                      VM all
+                    </button>
+                    <button
+                      className="btn sm"
+                      onClick={async () => {
+                        await api.post(`/api/projects/${projectId}/mappings/bulk`, { action: "setVoicemail", voicemailEnabled: false });
+                        load();
+                      }}
+                    >
+                      VM none
+                    </button>
+                  </>
+                )}
                 {type === "route_pattern" && (
                   <>
                     <select
@@ -248,6 +271,7 @@ export function ReviewPage() {
                   <th>Identity</th>
                   <th>Number / Ext</th>
                   <th>Location</th>
+                  {type === "person" && <th title="Provision voicemail on Webex">VM</th>}
                   <th>Readiness</th>
                   <th>Notes</th>
                   <th style={{ width: 44 }}></th>
@@ -291,6 +315,21 @@ export function ReviewPage() {
                           </>
                         )}
                       </td>
+                      {type === "person" && (
+                        <td>
+                          <input
+                            type="checkbox"
+                            title="Provision voicemail on Webex (regardless of Unity)"
+                            checked={p.voicemail === true}
+                            onChange={async (e) => {
+                              const updated = await api.patch<Mapping>(`/api/projects/${projectId}/mappings/${m.id}`, {
+                                voicemailOverride: e.target.checked,
+                              });
+                              setMappings((prev) => prev?.map((x) => (x.id === m.id ? updated : x)) ?? null);
+                            }}
+                          />
+                        </td>
+                      )}
                       <td>
                         <span className="pill-row">
                           <Pill tone={m.confidence}>

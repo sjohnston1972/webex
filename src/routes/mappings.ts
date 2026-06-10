@@ -18,9 +18,9 @@ mappings.get("/:id/mappings", async (c) => {
   return c.json(results);
 });
 
-// Edit one mapping: selection, payload (merged), or both.
+// Edit one mapping: selection, payload (merged), voicemail override, or any combination.
 mappings.patch("/:id/mappings/:mappingId", async (c) => {
-  const body = await c.req.json<{ selected?: boolean; payload?: Record<string, unknown> }>();
+  const body = await c.req.json<{ selected?: boolean; payload?: Record<string, unknown>; voicemailOverride?: boolean }>();
   const row = await c.env.DB.prepare("SELECT * FROM mappings WHERE id = ? AND project_id = ?")
     .bind(c.req.param("mappingId"), c.req.param("id"))
     .first<{ target_payload: string; target_type: string }>();
@@ -37,6 +37,15 @@ mappings.patch("/:id/mappings/:mappingId", async (c) => {
   if (body.selected !== undefined) {
     await c.env.DB.prepare("UPDATE mappings SET selected = ? WHERE id = ?")
       .bind(body.selected ? 1 : 0, c.req.param("mappingId"))
+      .run();
+  }
+  // Voicemail toggle is a provisioning choice, not an "edit": no status change,
+  // and the override survives mapping regeneration.
+  if (body.voicemailOverride !== undefined) {
+    await c.env.DB.prepare(
+      "UPDATE mappings SET vm_override = ?, target_payload = json_set(target_payload, '$.voicemail', json(?)) WHERE id = ?",
+    )
+      .bind(body.voicemailOverride ? 1 : 0, body.voicemailOverride ? "true" : "false", c.req.param("mappingId"))
       .run();
   }
   const updated = await c.env.DB.prepare("SELECT * FROM mappings WHERE id = ?").bind(c.req.param("mappingId")).first();
@@ -85,11 +94,23 @@ mappings.put("/:id/site-mappings", async (c) => {
 mappings.post("/:id/mappings/bulk", async (c) => {
   const projectId = c.req.param("id");
   const body = await c.req.json<{
-    action: "select" | "deselect" | "setLocation" | "setRouteChoice";
+    action: "select" | "deselect" | "setLocation" | "setRouteChoice" | "setVoicemail";
     targetType?: string;
     locationName?: string;
     routeChoice?: { type: string; id: string; name: string };
+    voicemailEnabled?: boolean;
   }>();
+
+  if (body.action === "setVoicemail") {
+    const enabled = body.voicemailEnabled === true;
+    await c.env.DB.prepare(
+      `UPDATE mappings SET vm_override = ?, target_payload = json_set(target_payload, '$.voicemail', json(?))
+       WHERE project_id = ? AND target_type = 'person'`,
+    )
+      .bind(enabled ? 1 : 0, enabled ? "true" : "false", projectId)
+      .run();
+    return c.json({ ok: true });
+  }
 
   if (body.action === "setRouteChoice") {
     if (!body.routeChoice?.id || !body.routeChoice?.type) return c.json({ error: "routeChoice {type,id,name} required" }, 400);
