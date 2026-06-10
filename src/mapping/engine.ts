@@ -362,7 +362,9 @@ export function buildWorkspaceMapping(phone: SrcPhone) {
  * workspace's number, not a hunt group number. Used by the summary tile and
  * the readiness report so nothing is silently dropped.
  */
-export async function listUnattachedDns(env: Env, projectId: string): Promise<string[]> {
+export type UnattachedDn = { pattern: string; device: string | null; model: string | null; owner: string | null };
+
+export async function listUnattachedDns(env: Env, projectId: string): Promise<UnattachedDn[]> {
   const lines = (
     await env.DB.prepare("SELECT pattern FROM src_lines WHERE project_id = ?").bind(projectId).all<{ pattern: string }>()
   ).results;
@@ -383,9 +385,29 @@ export async function listUnattachedDns(env: Env, projectId: string): Promise<st
       /* our own JSON */
     }
   }
+  // Which device carries each line (explains *why* it has no path, e.g. CTI ports).
+  const deviceByLine = new Map<string, { device: string; model: string | null; owner: string | null }>();
+  const phones = (
+    await env.DB.prepare("SELECT device_name, model, owner_userid, lines_json FROM src_phones WHERE project_id = ?")
+      .bind(projectId)
+      .all<{ device_name: string; model: string | null; owner_userid: string | null; lines_json: string | null }>()
+  ).results;
+  for (const ph of phones) {
+    try {
+      for (const dn of JSON.parse(ph.lines_json ?? "[]") as string[]) {
+        if (!deviceByLine.has(dn)) deviceByLine.set(dn, { device: ph.device_name, model: ph.model, owner: ph.owner_userid });
+      }
+    } catch {
+      /* our own JSON */
+    }
+  }
   return lines
     .map((l) => l.pattern)
-    .filter((pattern) => !covered.has(pattern) && !covered.has(sanitizeExtension(pattern).extension));
+    .filter((pattern) => !covered.has(pattern) && !covered.has(sanitizeExtension(pattern).extension))
+    .map((pattern) => {
+      const dev = deviceByLine.get(pattern);
+      return { pattern, device: dev?.device ?? null, model: dev?.model ?? null, owner: dev?.owner ?? null };
+    });
 }
 
 /** Most common non-null value, or null. */

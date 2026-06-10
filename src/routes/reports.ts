@@ -29,7 +29,12 @@ reports.get("/:id/reports/readiness.csv", async (c) => {
   });
   // Nothing silently dropped: DNs with no migration path get their own rows.
   for (const dn of await listUnattachedDns(c.env, c.req.param("id"))) {
-    rows.push(["directory_number (unattached)", dn, dn, "", "red", "no", "none", "No migration path: not a person, workspace or hunt group number"]);
+    const why = dn.model === "CTI Port"
+      ? `On CTI Port ${dn.device}${dn.owner ? ` (owner ${dn.owner})` : ""} — application endpoint (contact centre/recording); re-architect, not migrate`
+      : dn.device
+        ? `Secondary/shared line on ${dn.device}${dn.model ? ` (${dn.model})` : ""}${dn.owner ? `, owner ${dn.owner}` : ""} — not migrated automatically`
+        : "Not associated with any device — likely test/utility pattern";
+    rows.push(["directory_number (unattached)", dn.pattern, dn.pattern, "", "red", "no", "none", why]);
   }
   return csvResponse(
     "readiness-report.csv",
