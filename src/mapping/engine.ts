@@ -228,6 +228,20 @@ function mostCommon(values: (string | null | undefined)[]): string | null {
 
 /** (Re)generate mappings for a project. Preserves rows the user edited or deselected. */
 export async function generateMappings(env: Env, projectId: string): Promise<{ generated: number }> {
+  // Re-ingesting replaces src rows (new ids) — drop mappings that now point at nothing.
+  const orphanCleanup: [string, string][] = [
+    ["user", "src_users"],
+    ["hunt_pilot", "src_hunt_pilots"],
+    ["pickup_group", "src_pickup_groups"],
+    ["trans_pattern", "src_trans_patterns"],
+  ];
+  for (const [srcType, table] of orphanCleanup) {
+    await env.DB.prepare(
+      `DELETE FROM mappings WHERE project_id = ? AND src_type = ? AND src_id NOT IN (SELECT id FROM ${table} WHERE project_id = ?)`,
+    )
+      .bind(projectId, srcType, projectId)
+      .run();
+  }
   const users = (await env.DB.prepare("SELECT * FROM src_users WHERE project_id = ?").bind(projectId).all<SrcUser>()).results;
   const vmBoxes = (await env.DB.prepare("SELECT alias, extension FROM src_vm_boxes WHERE project_id = ?").bind(projectId).all<SrcVmBox>()).results;
   const pilots = (await env.DB.prepare("SELECT * FROM src_hunt_pilots WHERE project_id = ?").bind(projectId).all<SrcHuntPilot>()).results;
