@@ -44,10 +44,11 @@ webex.post("/:id/webex/locations", async (c) => {
   if (!body.name?.trim()) return c.json({ error: "name is required" }, 400);
   try {
     const client = await WebexClient.forProject(c.env, c.req.param("id"));
+    const language = (body.preferredLanguage ?? "en_GB").toLowerCase(); // announcement language codes are lowercase (en_gb, en_us)
     const details = {
       timeZone: body.timeZone ?? "Europe/London",
-      preferredLanguage: body.preferredLanguage ?? "en_GB",
-      announcementLanguage: body.preferredLanguage ?? "en_GB",
+      preferredLanguage: language,
+      announcementLanguage: language,
       address: body.address ?? {
         address1: "1 Example Street",
         city: "London",
