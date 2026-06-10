@@ -101,6 +101,14 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
           worsen("amber");
           notes.push(`Extension ${payload.extension} appears to be in use`);
         }
+      } else if (item.target_type === "translation_pattern") {
+        if (!payload.replacementPattern) {
+          worsen("red");
+          notes.push("No replacement pattern derived from CUCM — edit the mapping or handle manually in Control Hub");
+        } else {
+          worsen("amber");
+          notes.push("Translation patterns push at org level — verify matching/replacement syntax before pushing");
+        }
       } else if (item.target_type === "hunt_group" || item.target_type === "call_pickup") {
         checkLocation();
         const agents: string[] = payload.agentEmails ?? [];

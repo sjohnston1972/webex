@@ -35,7 +35,7 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
 
   try {
     // Replace previous AXL-sourced rows for this project.
-    const srcTables = ["src_users", "src_phones", "src_lines", "src_hunt_pilots", "src_hunt_members", "src_pickup_groups"];
+    const srcTables = ["src_users", "src_phones", "src_lines", "src_hunt_pilots", "src_hunt_members", "src_pickup_groups", "src_trans_patterns"];
     for (const table of srcTables) {
       await env.DB.prepare(
         `DELETE FROM ${table} WHERE project_id = ? AND snapshot_id IN
@@ -75,8 +75,8 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
       env.DB,
       phones.map((p) =>
         env.DB.prepare(
-          `INSERT INTO src_phones (id, project_id, snapshot_id, device_name, description, model, owner_userid, raw_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO src_phones (id, project_id, snapshot_id, device_name, description, model, owner_userid, device_pool, location_name, raw_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           uuid(),
           projectId,
@@ -85,6 +85,8 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
           text(p.description) || null,
           text(p.model) || null,
           text(p.ownerUserName) || null,
+          text(p.devicePoolName) || null,
+          text(p.locationName) || null,
           JSON.stringify(p),
         ),
       ),
@@ -154,6 +156,33 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
     await batchAll(env.DB, memberStmts);
     counts.hunt_pilots = pilots.length;
     counts.hunt_members = memberCount;
+
+    // Translation patterns (non-fatal — older CUCMs may reject some returnedTags)
+    try {
+      const tps = await axl.listTranslationPatterns();
+      await batchAll(
+        env.DB,
+        tps.map((t) =>
+          env.DB.prepare(
+            `INSERT INTO src_trans_patterns (id, project_id, snapshot_id, pattern, partition_name, description, called_party_mask, prefix_digits, raw_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).bind(
+            uuid(),
+            projectId,
+            snapshotId,
+            text(t.pattern),
+            text(t.routePartitionName) || null,
+            text(t.description) || null,
+            text(t.calledPartyTransformationMask) || null,
+            text(t.prefixDigitsOut) || null,
+            JSON.stringify(t),
+          ),
+        ),
+      );
+      counts.trans_patterns = tps.length;
+    } catch (e) {
+      warnings.push(`Translation patterns not pulled: ${e instanceof Error ? e.message : e}`);
+    }
 
     // Pickup groups (+ membership via SQL; non-fatal if the schema query fails)
     const pickups = await axl.listPickupGroups();

@@ -8,7 +8,10 @@ const TYPE_LABELS: Record<string, string> = {
   person: "People (users + numbers + voicemail)",
   hunt_group: "Hunt groups",
   call_pickup: "Call pickup groups",
+  translation_pattern: "Translation patterns (deselected by default — review digit manipulation)",
 };
+
+type SiteMapping = { cucmSite: string; phones: number; webexLocation: string | null };
 
 export function ReviewPage() {
   const { summary, reload } = useOutletContext<ProjectContext>();
@@ -93,7 +96,9 @@ export function ReviewPage() {
 
       {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
 
-      <Card title="Webex location" sub="applied to every mapping — required before validation">
+      <SitesCard projectId={projectId!} locations={locations} onSaved={() => { generate(); }} />
+
+      <Card title="Fallback: one Webex location for everything" sub="overrides per-site mapping on all mappings">
         <div className="toolbar">
           {locations.length > 0 ? (
             <div className="field" style={{ marginBottom: 0, minWidth: 260 }}>
@@ -171,11 +176,21 @@ export function ReviewPage() {
                             <div>{p.name}</div>
                             {type === "hunt_group" && <div className="dim small">policy: {p.policy}{p.agentEmails?.length ? ` · ${p.agentEmails.length} agents` : ""}</div>}
                             {type === "call_pickup" && <div className="dim small">{p.agentEmails?.length ?? 0} members</div>}
+                            {type === "translation_pattern" && <div className="dim small mono">{p.matchingPattern} → {p.replacementPattern ?? "?"}</div>}
                           </>
                         )}
                       </td>
-                      <td className="mono">{p.phoneNumber ?? p.extension ?? "—"}</td>
-                      <td>{p.locationName ?? <span className="dim">unset</span>}</td>
+                      <td className="mono">{type === "translation_pattern" ? (p.cucmPartition ?? "—") : (p.phoneNumber ?? p.extension ?? "—")}</td>
+                      <td>
+                        {type === "translation_pattern" ? (
+                          <span className="dim">org-wide</span>
+                        ) : (
+                          <>
+                            {p.locationName ?? <span className="dim">unset</span>}
+                            {p.cucmSite && <div className="dim small">CUCM: {p.cucmSite}</div>}
+                          </>
+                        )}
+                      </td>
                       <td>
                         <Pill tone={m.confidence}>{m.confidence === "green" ? "ready" : m.confidence === "amber" ? "review" : "blocked"}</Pill>
                         {m.status === "edited" && (
@@ -195,5 +210,83 @@ export function ReviewPage() {
         ))
       )}
     </>
+  );
+}
+
+function SitesCard({ projectId, locations, onSaved }: { projectId: string; locations: string[]; onSaved: () => void }) {
+  const [sites, setSites] = useState<SiteMapping[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  useEffect(() => {
+    api.get<SiteMapping[]>(`/api/projects/${projectId}/site-mappings`).then(setSites).catch(() => setSites([]));
+  }, [projectId]);
+
+  if (!sites || sites.length === 0) return null;
+
+  const setSite = (cucmSite: string, webexLocation: string) => {
+    setSites((prev) => prev!.map((s) => (s.cucmSite === cucmSite ? { ...s, webexLocation: webexLocation || null } : s)));
+  };
+
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.put(`/api/projects/${projectId}/site-mappings`, {
+        mappings: sites.map((s) => ({ cucmSite: s.cucmSite, webexLocation: s.webexLocation })),
+      });
+      setMsg({ tone: "ok", text: "Site mappings saved — regenerating mappings to apply locations." });
+      onSaved();
+    } catch (err) {
+      setMsg({ tone: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card title="CUCM sites → Webex locations" sub="from device pools / CUCM locations on phones" tight>
+      {msg && (
+        <div style={{ padding: "12px 14px 0" }}>
+          <Alert tone={msg.tone}>{msg.text}</Alert>
+        </div>
+      )}
+      <table className="data">
+        <thead>
+          <tr>
+            <th>CUCM site</th>
+            <th>Phones</th>
+            <th>Webex location</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sites.map((s) => (
+            <tr key={s.cucmSite}>
+              <td>{s.cucmSite}</td>
+              <td className="mono">{s.phones}</td>
+              <td>
+                {locations.length > 0 ? (
+                  <select value={s.webexLocation ?? ""} onChange={(e) => setSite(s.cucmSite, e.target.value)} style={{ padding: "5px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit" }}>
+                    <option value="">— not mapped —</option>
+                    {locations.map((l) => (
+                      <option key={l} value={l}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input value={s.webexLocation ?? ""} onChange={(e) => setSite(s.cucmSite, e.target.value)} placeholder="Webex location name" style={{ padding: "5px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit" }} />
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div style={{ padding: "12px 14px" }}>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? <Spinner /> : "Save & apply to mappings"}
+        </button>
+      </div>
+    </Card>
   );
 }

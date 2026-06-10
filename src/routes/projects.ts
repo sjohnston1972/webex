@@ -10,6 +10,7 @@ const SRC_TABLES = [
   "src_hunt_members",
   "src_pickup_groups",
   "src_vm_boxes",
+  "src_trans_patterns",
 ];
 
 export const projects = new Hono<AppContext>();
@@ -114,6 +115,7 @@ projects.delete("/:id", async (c) => {
     "source_snapshots",
     "axl_connections",
     "webex_tokens",
+    "site_mappings",
   ];
   for (const table of tables) {
     if (table === "batch_items") {

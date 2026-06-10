@@ -81,9 +81,9 @@ ingest.post("/:id/snapshots/:snapshotId/parse", async (c) => {
           if (!f.device_name) continue;
           stmts.push(
             c.env.DB.prepare(
-              `INSERT INTO src_phones (id, project_id, snapshot_id, device_name, description, model, owner_userid, raw_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).bind(uuid(), projectId, snapshotId, f.device_name, f.description, f.model, f.owner_userid, raw),
+              `INSERT INTO src_phones (id, project_id, snapshot_id, device_name, description, model, owner_userid, device_pool, location_name, raw_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).bind(uuid(), projectId, snapshotId, f.device_name, f.description, f.model, f.owner_userid, f.device_pool, f.location_name, raw),
           );
         } else if (kind === "lines") {
           if (!f.pattern) continue;
@@ -129,6 +129,7 @@ const OBJECT_TABLES: Record<string, string> = {
   hunt_pilots: "src_hunt_pilots",
   pickup_groups: "src_pickup_groups",
   vm_boxes: "src_vm_boxes",
+  trans_patterns: "src_trans_patterns",
 };
 
 ingest.get("/:id/objects/:type", async (c) => {

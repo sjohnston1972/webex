@@ -61,6 +61,8 @@ const PHONE_FIELDS: FieldSpec = {
   description: ["description"],
   model: ["model", "device type", "phone type"],
   owner_userid: ["owner user id", "owner", "owner userid", "user id"],
+  device_pool: ["device pool", "device pool name"],
+  location_name: ["location", "location name"],
 };
 
 const LINE_FIELDS: FieldSpec = {

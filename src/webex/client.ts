@@ -11,6 +11,7 @@ export const REQUESTED_SCOPES = [
   "spark-admin:telephony_config_read",
   "spark-admin:telephony_config_write",
   "spark-admin:locations_read",
+  "spark-admin:locations_write",
   "spark-admin:licenses_read",
   "spark:kms",
 ].join(" ");
@@ -204,6 +205,23 @@ export class WebexClient {
 
   deleteCallPickup(locationId: string, callPickupId: string) {
     return this.request("DELETE", `/telephony/config/locations/${locationId}/callPickups/${callPickupId}`);
+  }
+
+  createLocation(payload: Record<string, unknown>) {
+    return this.request("POST", "/locations", payload);
+  }
+
+  /** Enable an existing location for Webex Calling. */
+  enableLocationCalling(locationId: string) {
+    return this.request("POST", "/telephony/config/locations", { id: locationId });
+  }
+
+  createTranslationPattern(payload: Record<string, unknown>) {
+    return this.request("POST", "/telephony/config/callRouting/translationPatterns", payload);
+  }
+
+  deleteTranslationPattern(translationPatternId: string) {
+    return this.request("DELETE", `/telephony/config/callRouting/translationPatterns/${translationPatternId}`);
   }
 
   setVoicemail(personId: string, enabled: boolean) {

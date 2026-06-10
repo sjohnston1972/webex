@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, mapHuntPolicy } from "../src/mapping/engine";
+import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildTranslationPatternMapping, mapHuntPolicy } from "../src/mapping/engine";
 
 const user = (over: Partial<Record<string, string | null>> = {}) => ({
   id: "u1",
@@ -72,6 +72,40 @@ describe("buildHuntGroupMapping", () => {
     const { confidence, notes } = buildHuntGroupMapping(multi, ["1001"], usersByExt);
     expect(confidence).toBe("amber");
     expect(notes.join(" ")).toMatch(/multiple line groups/i);
+  });
+});
+
+describe("buildTranslationPatternMapping", () => {
+  const tp = (over: Partial<Record<string, string | null>> = {}) => ({
+    id: "t1",
+    pattern: "8XXX",
+    partition_name: "PT-Internal",
+    description: "DID alias",
+    called_party_mask: null as string | null,
+    prefix_digits: null as string | null,
+    ...over,
+  });
+
+  it("is amber with a mask-derived replacement", () => {
+    const { payload, confidence } = buildTranslationPatternMapping(tp({ called_party_mask: "1001" }), new Set());
+    expect(confidence).toBe("amber");
+    expect(payload.matchingPattern).toBe("8XXX");
+    expect(payload.replacementPattern).toBe("1001");
+  });
+
+  it("notes when the mask resolves to a known extension", () => {
+    const { notes } = buildTranslationPatternMapping(tp({ called_party_mask: "1001" }), new Set(["1001"]));
+    expect(notes.join(" ")).toMatch(/resolves to internal extension 1001/);
+  });
+
+  it("is red for prefix-digit patterns", () => {
+    const { confidence, payload } = buildTranslationPatternMapping(tp({ prefix_digits: "9" }), new Set());
+    expect(confidence).toBe("red");
+    expect(payload.replacementPattern).toBeNull();
+  });
+
+  it("is red with no transformation at all", () => {
+    expect(buildTranslationPatternMapping(tp(), new Set()).confidence).toBe("red");
   });
 });
 

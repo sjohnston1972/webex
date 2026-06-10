@@ -108,7 +108,7 @@ export class AxlClient {
     const ret = await this.request(
       "listPhone",
       `<searchCriteria><name>%</name></searchCriteria>
-       <returnedTags><name/><description/><model/><ownerUserName/></returnedTags>`,
+       <returnedTags><name/><description/><model/><ownerUserName/><devicePoolName/><locationName/></returnedTags>`,
     );
     return ensureArray(ret?.phone);
   }
@@ -161,6 +161,15 @@ export class AxlClient {
       .map((m: any) => text(m.directoryNumber?.pattern))
       .filter(Boolean);
     return { algorithm: text(lg?.distributionAlgorithm), members };
+  }
+
+  async listTranslationPatterns(): Promise<any[]> {
+    const ret = await this.request(
+      "listTransPattern",
+      `<searchCriteria><pattern>%</pattern></searchCriteria>
+       <returnedTags><pattern/><description/><routePartitionName/><calledPartyTransformationMask/><prefixDigitsOut/></returnedTags>`,
+    );
+    return ensureArray(ret?.transPattern);
   }
 
   async listPickupGroups(): Promise<any[]> {

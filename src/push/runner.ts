@@ -27,7 +27,7 @@ type ItemRow = {
   target_payload: string;
 };
 
-const GROUP_TYPES = ["hunt_group", "call_pickup"];
+const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern"];
 
 export async function startPush(env: Env, projectId: string, batchId: string): Promise<{ queued: number }> {
   await env.DB.prepare("UPDATE batches SET status = 'pushing' WHERE id = ?").bind(batchId).run();
@@ -256,6 +256,14 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     const result = (await client.createCallPickup(loc.id, { name: payload.name, agents })) as any;
     await recordSuccess(env, item.id, result.id, { created: true, type: "call_pickup", locationId: loc.id });
     if (missing.length > 0) await appendError(env, item.id, `Created without unresolvable members: ${missing.join(", ")}`);
+  } else if (item.target_type === "translation_pattern") {
+    if (!payload.replacementPattern) throw new Error("No replacement pattern derived — review and edit this mapping before pushing");
+    const result = (await client.createTranslationPattern({
+      name: String(payload.name).slice(0, 30).replace(/[^a-zA-Z0-9_ -]/g, "_"),
+      matchingPattern: payload.matchingPattern,
+      replacementPattern: payload.replacementPattern,
+    })) as any;
+    await recordSuccess(env, item.id, result.id, { created: true, type: "translation_pattern" });
   } else {
     throw new Error(`Unsupported target type: ${item.target_type}`);
   }
@@ -273,6 +281,7 @@ async function rollbackItem(env: Env, item: ItemRow): Promise<void> {
     if (info.type === "person") await client.deletePerson(item.webex_resource_id);
     else if (info.type === "hunt_group") await client.deleteHuntGroup(info.locationId, item.webex_resource_id);
     else if (info.type === "call_pickup") await client.deleteCallPickup(info.locationId, item.webex_resource_id);
+    else if (info.type === "translation_pattern") await client.deleteTranslationPattern(item.webex_resource_id);
   } catch (e) {
     // 404 means it's already gone — that's a successful rollback.
     const status = (e as { status?: number }).status;

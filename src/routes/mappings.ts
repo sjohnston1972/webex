@@ -41,6 +41,44 @@ mappings.patch("/:id/mappings/:mappingId", async (c) => {
   return c.json(updated);
 });
 
+// CUCM sites (device pools / locations seen on phones) and their Webex location mapping.
+mappings.get("/:id/site-mappings", async (c) => {
+  const projectId = c.req.param("id");
+  const sites = (
+    await c.env.DB.prepare(
+      `SELECT COALESCE(device_pool, location_name) AS site, COUNT(*) AS phones
+       FROM src_phones WHERE project_id = ? AND COALESCE(device_pool, location_name) IS NOT NULL
+       GROUP BY site ORDER BY phones DESC`,
+    )
+      .bind(projectId)
+      .all<{ site: string; phones: number }>()
+  ).results;
+  const saved = new Map(
+    (
+      await c.env.DB.prepare("SELECT cucm_site, webex_location FROM site_mappings WHERE project_id = ?")
+        .bind(projectId)
+        .all<{ cucm_site: string; webex_location: string | null }>()
+    ).results.map((r) => [r.cucm_site, r.webex_location]),
+  );
+  return c.json(sites.map((s) => ({ cucmSite: s.site, phones: s.phones, webexLocation: saved.get(s.site) ?? null })));
+});
+
+mappings.put("/:id/site-mappings", async (c) => {
+  const projectId = c.req.param("id");
+  const body = await c.req.json<{ mappings?: { cucmSite: string; webexLocation: string | null }[] }>();
+  if (!Array.isArray(body.mappings)) return c.json({ error: "mappings array required" }, 400);
+  for (const m of body.mappings) {
+    if (!m.cucmSite) continue;
+    await c.env.DB.prepare(
+      `INSERT INTO site_mappings (project_id, cucm_site, webex_location) VALUES (?, ?, ?)
+       ON CONFLICT(project_id, cucm_site) DO UPDATE SET webex_location = excluded.webex_location`,
+    )
+      .bind(projectId, m.cucmSite, m.webexLocation ?? null)
+      .run();
+  }
+  return c.json({ saved: body.mappings.length });
+});
+
 // Bulk operations: select/deselect all (optionally by type), set location on all selected.
 mappings.post("/:id/mappings/bulk", async (c) => {
   const projectId = c.req.param("id");
