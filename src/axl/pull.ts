@@ -160,7 +160,7 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
     let membersByGroup = new Map<string, string[]>();
     try {
       const rows = await axl.sql(
-        "select pg.name as pgname, n.dnorpattern as dn from pickupgroup pg inner join numplan n on n.fkpickupgroup = pg.pkid",
+        "select pg.name as pgname, n.dnorpattern as dn from pickupgroup pg inner join pickupgrouplinemap m on m.fkpickupgroup = pg.pkid inner join numplan n on n.pkid = m.fknumplan_line",
       );
       for (const r of rows) {
         const g = text(r.pgname);
