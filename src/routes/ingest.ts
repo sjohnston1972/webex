@@ -169,6 +169,8 @@ const OBJECT_TABLES: Record<string, string> = {
   vm_boxes: "src_vm_boxes",
   trans_patterns: "src_trans_patterns",
   dialplan: "src_dialplan",
+  hunt_members: "src_hunt_members",
+  vm_greetings: "src_vm_greetings",
 };
 
 ingest.get("/:id/objects/:type", async (c) => {

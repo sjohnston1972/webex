@@ -167,6 +167,8 @@ table.data td { word-break: break-word; }
 .tile:nth-child(4) { animation-delay: 0.09s; }
 .tile:nth-child(5) { animation-delay: 0.12s; }
 .tile:nth-child(6) { animation-delay: 0.15s; }
+.tile-click { border: none; text-align: left; font: inherit; color: inherit; cursor: pointer; transition: box-shadow 0.15s ease, transform 0.15s ease; }
+.tile-click:hover { box-shadow: 0 4px 14px rgba(32,41,47,0.12), 0 0 0 1px var(--border-strong); transform: translateY(-1px); }
 .tile-value { font-size: 24px; font-weight: 600; font-family: var(--font-mono); letter-spacing: -0.02em; }
 .tile-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin-top: 2px; }
 

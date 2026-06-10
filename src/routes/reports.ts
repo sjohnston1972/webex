@@ -53,6 +53,11 @@ reports.get("/:id/reports/dialplan.csv", async (c) => {
   return csvResponse("dial-plan-report.csv", toCsv(["Object type", "Pattern / Name", "Partition", "Description", "Detail"], rows));
 });
 
+// JSON list for the Overview "Unattached DNs" tile.
+reports.get("/:id/reports/unattached-dns", async (c) => {
+  return c.json(await listUnattachedDns(c.env, c.req.param("id")));
+});
+
 reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT m.target_type, m.target_payload, bi.validate_status, bi.validate_notes

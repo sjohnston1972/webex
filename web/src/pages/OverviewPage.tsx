@@ -1,8 +1,130 @@
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api } from "../api";
-import { Card, Empty, IngestCounts, Pill } from "../components";
+import { Card, Empty, IngestCounts, Modal, Pill, Spinner } from "../components";
 import type { ProjectContext } from "../App";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+// What each tile shows when clicked: where to fetch and which columns to render.
+type TileSpec = { title: string; fetch: (projectId: string) => string; columns: { key: string; label: string; render?: (row: any) => unknown }[] };
+
+const personName = (row: any) => {
+  const p = JSON.parse(row.target_payload);
+  return row.target_type === "person" ? (p.email ?? p.displayName) : (p.name ?? p.matchingPattern ?? p.cucmPattern);
+};
+const payloadCol = (key: string) => (row: any) => JSON.parse(row.target_payload)[key] ?? "—";
+
+const ELIGIBLE_COLUMNS = [
+  { key: "identity", label: "Identity", render: personName },
+  { key: "number", label: "Number / Ext", render: (r: any) => { const p = JSON.parse(r.target_payload); return p.phoneNumber ?? p.extension ?? p.dialPattern ?? "—"; } },
+  { key: "location", label: "Location", render: payloadCol("locationName") },
+  { key: "confidence", label: "Readiness", render: (r: any) => (r.confidence === "red" ? "blocked" : r.confidence === "amber" ? "review" : "ready") },
+  { key: "selected", label: "Selected", render: (r: any) => (r.selected ? "yes" : "no") },
+];
+
+const TILE_SPECS: Record<string, TileSpec> = {
+  users: { title: "End users", fetch: (id) => `/api/projects/${id}/objects/users`, columns: [
+    { key: "userid", label: "User ID" },
+    { key: "name", label: "Name", render: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || "—" },
+    { key: "email", label: "Email" },
+    { key: "primary_extension", label: "Extension" },
+  ] },
+  phones: { title: "Phones", fetch: (id) => `/api/projects/${id}/objects/phones`, columns: [
+    { key: "device_name", label: "Device" },
+    { key: "model", label: "Model" },
+    { key: "owner_userid", label: "Owner" },
+    { key: "device_pool", label: "Device pool" },
+    { key: "lines_json", label: "Lines" },
+  ] },
+  lines: { title: "Directory numbers", fetch: (id) => `/api/projects/${id}/objects/lines`, columns: [
+    { key: "pattern", label: "Pattern" },
+    { key: "partition_name", label: "Partition" },
+    { key: "description", label: "Description" },
+  ] },
+  hunt_pilots: { title: "Hunt pilots", fetch: (id) => `/api/projects/${id}/objects/hunt_pilots`, columns: [
+    { key: "pattern", label: "Pilot" },
+    { key: "description", label: "Description" },
+    { key: "algorithm", label: "Algorithm" },
+    { key: "hunt_list", label: "Hunt list" },
+  ] },
+  hunt_members: { title: "Hunt members", fetch: (id) => `/api/projects/${id}/objects/hunt_members`, columns: [
+    { key: "hunt_pilot_pattern", label: "Pilot" },
+    { key: "member_dn", label: "Member DN" },
+    { key: "position", label: "Order" },
+  ] },
+  pickup_groups: { title: "Pickup groups", fetch: (id) => `/api/projects/${id}/objects/pickup_groups`, columns: [
+    { key: "name", label: "Name" },
+    { key: "pattern", label: "Number" },
+    { key: "members_json", label: "Members" },
+  ] },
+  vm_boxes: { title: "Unity mailboxes", fetch: (id) => `/api/projects/${id}/objects/vm_boxes`, columns: [
+    { key: "alias", label: "Alias" },
+    { key: "display_name", label: "Display name" },
+    { key: "extension", label: "Extension" },
+    { key: "email", label: "Email" },
+  ] },
+  vm_greetings: { title: "Greeting files", fetch: (id) => `/api/projects/${id}/objects/vm_greetings`, columns: [
+    { key: "filename", label: "File" },
+    { key: "matched_alias", label: "Matched mailbox" },
+  ] },
+  trans_patterns: { title: "Translation patterns", fetch: (id) => `/api/projects/${id}/objects/trans_patterns`, columns: [
+    { key: "pattern", label: "Pattern" },
+    { key: "called_party_mask", label: "Mask" },
+    { key: "prefix_digits", label: "Prefix" },
+    { key: "description", label: "Description" },
+  ] },
+  dialplan: { title: "Dial plan objects", fetch: (id) => `/api/projects/${id}/objects/dialplan`, columns: [
+    { key: "object_type", label: "Type", render: (r) => String(r.object_type).replace(/_/g, " ") },
+    { key: "name", label: "Pattern / Name" },
+    { key: "partition_name", label: "Partition" },
+    { key: "description", label: "Description" },
+  ] },
+  unattached: { title: "Unattached DNs (no migration path)", fetch: (id) => `/api/projects/${id}/reports/unattached-dns`, columns: [
+    { key: "pattern", label: "DN" },
+    { key: "device", label: "On device" },
+    { key: "model", label: "Model" },
+    { key: "owner", label: "Owner" },
+  ] },
+};
+
+function eligibleSpec(targetType: string, label: string): TileSpec {
+  return { title: label, fetch: (id) => `/api/projects/${id}/mappings?type=${targetType}`, columns: ELIGIBLE_COLUMNS };
+}
+
+function TileModal({ projectId, spec, onClose }: { projectId: string; spec: TileSpec; onClose: () => void }) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api.get<any[]>(spec.fetch(projectId)).then(setRows).catch((e) => setError(e.message));
+  }, [projectId, spec]);
+
+  return (
+    <Modal title={spec.title} onClose={onClose} wide>
+      {error && <div className="alert error">{error}</div>}
+      {!rows && !error ? (
+        <Spinner />
+      ) : rows && rows.length === 0 ? (
+        <Empty>Nothing here yet.</Empty>
+      ) : rows && (
+        <div className="scroll-y" style={{ maxHeight: "56vh" }}>
+          <table className="data">
+            <thead>
+              <tr>{spec.columns.map((c) => <th key={c.key}>{c.label}</th>)}</tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.id ?? i}>
+                  {spec.columns.map((c) => (
+                    <td key={c.key} className="small">{String((c.render ? c.render(r) : r[c.key]) ?? "—")}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 const COUNT_LABELS: Record<string, string> = {
   users: "End users",
@@ -33,6 +155,7 @@ export function OverviewPage() {
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [tile, setTile] = useState<TileSpec | null>(null);
 
   const total = Object.values(summary.counts).reduce((a, b) => a + b, 0);
   const mapTotals = { green: 0, amber: 0, red: 0, selected: 0 };
@@ -56,10 +179,10 @@ export function OverviewPage() {
 
       <div className="tiles">
         {Object.entries(COUNT_LABELS).map(([key, label]) => (
-          <div className="tile" key={key}>
+          <button className="tile tile-click" key={key} onClick={() => TILE_SPECS[key] && setTile(TILE_SPECS[key])}>
             <div className="tile-value">{summary.counts[key] ?? 0}</div>
             <div className="tile-label">{label}</div>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -70,16 +193,20 @@ export function OverviewPage() {
           </h2>
           <div className="tiles">
             {summary.mappingsByType.map((m) => (
-              <div className="tile" key={m.target_type}>
+              <button
+                className="tile tile-click"
+                key={m.target_type}
+                onClick={() => setTile(eligibleSpec(m.target_type, ELIGIBLE_LABELS[m.target_type] ?? m.target_type))}
+              >
                 <div className="tile-value">{m.n}</div>
                 <div className="tile-label">{ELIGIBLE_LABELS[m.target_type] ?? m.target_type} · {m.selected ?? 0} selected</div>
-              </div>
+              </button>
             ))}
             {(summary.unattachedDns ?? 0) > 0 && (
-              <div className="tile" style={{ boxShadow: "0 1px 2px rgba(32,41,47,0.05), 0 0 0 1px #ecc7c5" }}>
+              <button className="tile tile-click" style={{ boxShadow: "0 1px 2px rgba(32,41,47,0.05), 0 0 0 1px #ecc7c5" }} onClick={() => setTile(TILE_SPECS.unattached)}>
                 <div className="tile-value" style={{ color: "var(--red)" }}>{summary.unattachedDns}</div>
                 <div className="tile-label">Unattached DNs · no migration path</div>
-              </div>
+              </button>
             )}
           </div>
         </>
@@ -192,6 +319,8 @@ export function OverviewPage() {
           </table>
         )}
       </Card>
+
+      {tile && <TileModal projectId={projectId!} spec={tile} onClose={() => setTile(null)} />}
 
       <Card title="Danger zone">
         {!confirmDelete ? (
