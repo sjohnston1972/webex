@@ -294,8 +294,33 @@ export function ReviewPage() {
                         ) : (
                           <>
                             <div>{p.name}</div>
-                            {type === "hunt_group" && <div className="dim small">policy: {p.policy}{p.agentEmails?.length ? ` · ${p.agentEmails.length} agents` : ""}</div>}
-                            {type === "call_pickup" && <div className="dim small">{p.agentEmails?.length ?? 0} members</div>}
+                            {type === "hunt_group" && (
+                              <>
+                                <div className="dim small">policy: {p.policy}</div>
+                                {(p.agentEmails?.length ?? 0) > 0 && (
+                                  <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 380 }}>
+                                    agents: {p.agentEmails.join(", ")}
+                                  </div>
+                                )}
+                                {(p.unresolvedMembers?.length ?? 0) > 0 && (
+                                  <div className="small" style={{ color: "var(--amber)" }}>unresolved DNs: {p.unresolvedMembers.join(", ")}</div>
+                                )}
+                              </>
+                            )}
+                            {type === "call_pickup" && (
+                              <>
+                                {(p.agentEmails?.length ?? 0) > 0 ? (
+                                  <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 380 }}>
+                                    members: {p.agentEmails.join(", ")}
+                                  </div>
+                                ) : (
+                                  <div className="dim small">no resolved members</div>
+                                )}
+                                {(p.unresolvedMembers?.length ?? 0) > 0 && (
+                                  <div className="small" style={{ color: "var(--amber)" }}>unresolved DNs: {p.unresolvedMembers.join(", ")}</div>
+                                )}
+                              </>
+                            )}
                             {type === "translation_pattern" && <div className="dim small mono">{p.matchingPattern} → {p.replacementPattern ?? "?"}</div>}
                             {type === "route_pattern" && <div className="dim small mono">{p.cucmPattern} → {p.dialPattern}</div>}
                             {type === "workspace" && <div className="dim small">{p.deviceModel ?? "phone"} · {p.deviceName}</div>}
