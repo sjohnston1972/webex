@@ -57,6 +57,9 @@ export function recheckMapping(targetType: string, payload: Record<string, any>)
     if (!payload.name) blocked("Workspace needs a name");
     checkExtension(payload.extension, "Extension");
     if (payload.phoneNumber && !/^\+\d{7,15}$/.test(String(payload.phoneNumber))) blocked(`Phone number "${payload.phoneNumber}" must be E.164`);
+  } else if (targetType === "call_park") {
+    if (!payload.extension) blocked("Needs a single park extension (plain digits)");
+    else checkExtension(payload.extension, "Park extension");
   } else if (targetType === "hunt_group") {
     checkExtension(payload.extension, "Hunt group number");
     if ((payload.unresolvedMembers ?? []).length > 0) review(`${payload.unresolvedMembers.length} member(s) still unresolved`);
@@ -336,6 +339,34 @@ export function buildPickupMapping(group: SrcPickup, usersByExtension: Map<strin
 type SrcRoutePattern = { id: string; name: string; partition_name: string | null; description: string | null };
 
 /**
+ * CUCM call park number/range → Webex Call Park Extension.
+ * CUCM ranges (e.g. 54XX) cannot push as one object — Webex park
+ * extensions are literal numbers, so ranges are blocked with guidance.
+ */
+export function buildCallParkMapping(cp: SrcRoutePattern) {
+  const notes: string[] = [];
+  let confidence: "green" | "amber" | "red" = "green";
+
+  const fixed = sanitizeExtension(cp.name);
+  if (fixed.removed.length > 0) notes.push(`Park number corrected: "${cp.name}" → "${fixed.extension}"`);
+  if (!fixed.valid) {
+    confidence = "red";
+    notes.push(
+      `"${cp.name}" is a range/pattern — Webex call park extensions are single numbers. Edit this mapping to one number and add the rest as separate park extensions in Control Hub, or use location call park groups instead`,
+    );
+  }
+
+  const payload = {
+    name: cp.description?.trim() || `Park ${fixed.extension || cp.name}`,
+    extension: fixed.valid ? fixed.extension : null,
+    cucmPattern: cp.name,
+    locationName: null as string | null,
+    cucmSite: null as string | null,
+  };
+  return { payload, confidence, notes };
+}
+
+/**
  * CUCM route pattern → dial pattern in a Webex premises-PSTN dial plan.
  * The route target (trunk / route group) is chosen by the engineer on the
  * Review page; CUCM's "." separator is stripped (Webex has no pre-dot).
@@ -499,6 +530,7 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     ["pickup_group", "src_pickup_groups"],
     ["trans_pattern", "src_trans_patterns"],
     ["route_pattern", "src_dialplan"],
+    ["call_park", "src_dialplan"],
     ["phone", "src_phones"],
   ];
   for (const [srcType, table] of orphanCleanup) {
@@ -515,6 +547,11 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   const transPatterns = (await env.DB.prepare("SELECT * FROM src_trans_patterns WHERE project_id = ?").bind(projectId).all<SrcTransPattern>()).results;
   const routePatterns = (
     await env.DB.prepare("SELECT id, name, partition_name, description FROM src_dialplan WHERE project_id = ? AND object_type = 'route_pattern'")
+      .bind(projectId)
+      .all<SrcRoutePattern>()
+  ).results;
+  const callParks = (
+    await env.DB.prepare("SELECT id, name, partition_name, description FROM src_dialplan WHERE project_id = ? AND object_type = 'call_park'")
       .bind(projectId)
       .all<SrcRoutePattern>()
   ).results;
@@ -617,6 +654,12 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   for (const rp of routePatterns) {
     const { payload, confidence, notes } = buildRoutePatternMapping(rp);
     upsert("route_pattern", rp.id, "route_pattern", payload, confidence, notes);
+  }
+  for (const cp of callParks) {
+    const { payload, confidence, notes } = buildCallParkMapping(cp);
+    // Park extensions are location-scoped; default to the most common site's location.
+    const site = mostCommon([...siteByUser.values()]);
+    upsert("call_park", cp.id, "call_park", { ...payload, cucmSite: site, locationName: locationFor(site) }, confidence, notes);
   }
   // Owner-less phones with at least one line become workspaces (common area).
   for (const phone of phones) {

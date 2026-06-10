@@ -109,6 +109,15 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
           worsen("amber");
           notes.push(`Extension ${payload.extension} appears to be in use`);
         }
+      } else if (item.target_type === "call_park") {
+        checkLocation();
+        if (!payload.extension) {
+          worsen("red");
+          notes.push("Range/pattern park number — edit to a single extension before pushing");
+        } else if (extensionsInUse.has(String(payload.extension))) {
+          worsen("amber");
+          notes.push(`Extension ${payload.extension} appears to be in use`);
+        }
       } else if (item.target_type === "workspace") {
         checkLocation();
         const wsLicense = licenses.find(

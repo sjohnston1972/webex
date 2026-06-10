@@ -173,6 +173,23 @@ describe("recheckMapping (after user edit)", () => {
   });
 });
 
+describe("buildCallParkMapping", () => {
+  it("maps a literal park number", async () => {
+    const { buildCallParkMapping } = await import("../src/mapping/engine");
+    const { payload, confidence } = buildCallParkMapping({ id: "cp1", name: "5400", partition_name: null, description: "Floor 1 park" });
+    expect(payload.extension).toBe("5400");
+    expect(payload.name).toBe("Floor 1 park");
+    expect(confidence).toBe("green");
+  });
+  it("blocks a range with guidance", async () => {
+    const { buildCallParkMapping } = await import("../src/mapping/engine");
+    const { payload, confidence, notes } = buildCallParkMapping({ id: "cp2", name: "54XX", partition_name: null, description: null });
+    expect(confidence).toBe("red");
+    expect(payload.extension).toBeNull();
+    expect(notes.join(" ")).toMatch(/range/i);
+  });
+});
+
 describe("buildRoutePatternMapping", () => {
   it("strips the CUCM pre-dot and flags for review", () => {
     const { payload, confidence, notes } = buildRoutePatternMapping({ id: "r1", name: "9.XXXXXXXXXX", partition_name: "PT-PSTN", description: "Local calls" });

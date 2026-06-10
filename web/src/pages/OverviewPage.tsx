@@ -23,6 +23,7 @@ const ELIGIBLE_LABELS: Record<string, string> = {
   translation_pattern: "Translation patterns",
   route_pattern: "Route patterns",
   workspace: "Workspaces (common area)",
+  call_park: "Call park extensions",
 };
 
 export function OverviewPage() {

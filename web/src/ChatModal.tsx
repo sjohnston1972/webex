@@ -25,6 +25,10 @@ export function suggestedQuestion(m: Mapping): string {
       return blocked
         ? `This common-area phone (${p.name}) is blocked — how can I migrate it to a Webex workspace?`
         : `What should I check before migrating common-area phone "${p.name}" as a Webex workspace?`;
+    case "call_park":
+      return blocked
+        ? `This CUCM call park number/range ("${p.cucmPattern}") is blocked — how should I implement call park in Webex Calling?`
+        : `What should I check before migrating call park "${p.cucmPattern}" to a Webex call park extension?`;
     case "hunt_group":
       return blocked
         ? `This hunt group ("${p.name}") is blocked — how do I get it into Webex Calling?`

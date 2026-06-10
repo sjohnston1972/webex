@@ -209,6 +209,14 @@ export class WebexClient {
     return this.request("DELETE", `/telephony/config/locations/${locationId}/callPickups/${callPickupId}`);
   }
 
+  createCallParkExtension(locationId: string, payload: { name: string; extension: string }) {
+    return this.request("POST", `/telephony/config/locations/${locationId}/callParkExtensions`, payload);
+  }
+
+  deleteCallParkExtension(locationId: string, extensionId: string) {
+    return this.request("DELETE", `/telephony/config/locations/${locationId}/callParkExtensions/${extensionId}`);
+  }
+
   createWorkspace(payload: Record<string, unknown>) {
     return this.request("POST", "/workspaces", payload);
   }

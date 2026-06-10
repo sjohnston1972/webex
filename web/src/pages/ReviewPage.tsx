@@ -12,6 +12,7 @@ const TYPE_LABELS: Record<string, string> = {
   translation_pattern: "Translation patterns (deselected by default — review digit manipulation)",
   route_pattern: "Route patterns (→ Webex dial plans, premises PSTN)",
   workspace: "Workspaces (owner-less / common-area phones)",
+  call_park: "Call park (→ Webex call park extensions)",
 };
 
 type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
@@ -49,6 +50,11 @@ const EDIT_FIELDS: Record<string, { key: string; label: string; hint?: string }[
   route_pattern: [
     { key: "name", label: "Name" },
     { key: "dialPattern", label: "Dial pattern", hint: "digits, X, [], !, *, #, +" },
+  ],
+  call_park: [
+    { key: "name", label: "Park name" },
+    { key: "extension", label: "Park extension", hint: "single number, plain digits" },
+    { key: "locationName", label: "Webex location" },
   ],
 };
 

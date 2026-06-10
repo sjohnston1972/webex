@@ -27,7 +27,7 @@ type ItemRow = {
   target_payload: string;
 };
 
-const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern", "route_pattern"];
+const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern", "route_pattern", "call_park"];
 
 export async function startPush(env: Env, projectId: string, batchId: string): Promise<{ queued: number }> {
   await env.DB.prepare("UPDATE batches SET status = 'pushing' WHERE id = ?").bind(batchId).run();
@@ -89,8 +89,11 @@ export async function startRollback(env: Env, projectId: string, batchId: string
       .all<{ id: string; target_type: string }>()
   ).results;
 
-  // Groups first, then people.
-  const ordered = [...items.filter((i) => GROUP_TYPES.includes(i.target_type)), ...items.filter((i) => i.target_type === "person")];
+  // Groups first, then people/workspaces (reverse of push order).
+  const ordered = [
+    ...items.filter((i) => GROUP_TYPES.includes(i.target_type)),
+    ...items.filter((i) => i.target_type === "person" || i.target_type === "workspace"),
+  ];
   let queued = 0;
   for (const item of ordered) {
     const jobId = uuid();
@@ -270,6 +273,11 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     const result = (await client.createCallPickup(loc.id, { name: payload.name, agents })) as any;
     await recordSuccess(env, item.id, result.id, { created: true, type: "call_pickup", locationId: loc.id });
     if (missing.length > 0) await appendError(env, item.id, `Created without unresolvable members: ${missing.join(", ")}`);
+  } else if (item.target_type === "call_park") {
+    if (!payload.extension) throw new Error("Call park range/pattern cannot push — edit the mapping to a single extension first");
+    const loc = await resolveLocation();
+    const result = (await client.createCallParkExtension(loc.id, { name: payload.name, extension: payload.extension })) as any;
+    await recordSuccess(env, item.id, result.id, { created: true, type: "call_park", locationId: loc.id });
   } else if (item.target_type === "translation_pattern") {
     if (!payload.replacementPattern) throw new Error("No replacement pattern derived — review and edit this mapping before pushing");
     const result = (await client.createTranslationPattern({
@@ -308,6 +316,7 @@ async function rollbackItem(env: Env, item: ItemRow): Promise<void> {
     else if (info.type === "workspace") await client.deleteWorkspace(item.webex_resource_id);
     else if (info.type === "hunt_group") await client.deleteHuntGroup(info.locationId, item.webex_resource_id);
     else if (info.type === "call_pickup") await client.deleteCallPickup(info.locationId, item.webex_resource_id);
+    else if (info.type === "call_park") await client.deleteCallParkExtension(info.locationId, item.webex_resource_id);
     else if (info.type === "translation_pattern") await client.deleteTranslationPattern(item.webex_resource_id);
     else if (info.type === "route_pattern") {
       // Remove only this pattern; the dial plan itself stays (other patterns may share it).
