@@ -5,3 +5,4 @@ dist/
 .dev.vars
 tunnel-token.txt
 dcloud-project-id.txt
+pilot-batch-id.txt
