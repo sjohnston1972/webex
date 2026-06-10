@@ -228,10 +228,36 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
       if (payload.phoneNumber) body.phoneNumbers = [{ type: "work", value: payload.phoneNumber }];
     }
 
-    const person = (await client.createPerson(body)) as any;
+    let person: any;
+    let fellBackNumberless = false;
+    try {
+      person = (await client.createPerson(body)) as any;
+    } catch (e) {
+      const status = (e as { status?: number }).status;
+      // 409 with a number attached usually means the extension/number is taken
+      // (shared lines) — retry as a plain person. If the email itself is the
+      // conflict (domain owned by another org), this fails too and we rethrow.
+      if (status === 409 && !numberless) {
+        try {
+          person = (await client.createPerson({
+            emails: [payload.email],
+            firstName: payload.firstName ?? undefined,
+            lastName: payload.lastName ?? undefined,
+            displayName: payload.displayName ?? undefined,
+          })) as any;
+          fellBackNumberless = true;
+        } catch {
+          throw e;
+        }
+      } else {
+        throw e;
+      }
+    }
     await recordSuccess(env, item.id, person.id, { created: true, type: "person" });
     if (numberless) {
       await appendError(env, item.id, "Created without Webex Calling (no number available) — assign a licence and number manually if needed");
+    } else if (fellBackNumberless) {
+      await appendError(env, item.id, "Number/extension already assigned in Webex (shared line) — created without a number; assign manually if needed");
     } else {
       await applyVoicemail(env, client, item.id, person.id, payload);
     }
