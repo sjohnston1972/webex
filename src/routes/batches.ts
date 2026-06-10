@@ -56,7 +56,7 @@ batches.post("/:id/batches/:batchId/push", async (c) => {
     .bind(c.req.param("batchId"), c.req.param("id"))
     .first<{ status: string }>();
   if (!batch) return c.json({ error: "not found" }, 404);
-  if (!["validated", "failed", "pushed"].includes(batch.status)) {
+  if (!["validated", "failed", "pushed", "pushing"].includes(batch.status)) {
     return c.json({ error: `Batch must be validated before pushing (status: ${batch.status})` }, 400);
   }
   const result = await startPush(c.env, c.req.param("id"), c.req.param("batchId"));

@@ -32,10 +32,23 @@ const GROUP_TYPES = ["hunt_group", "call_pickup"];
 export async function startPush(env: Env, projectId: string, batchId: string): Promise<{ queued: number }> {
   await env.DB.prepare("UPDATE batches SET status = 'pushing' WHERE id = ?").bind(batchId).run();
 
+  // Supersede any dangling jobs from a previous run so late queue
+  // redeliveries become no-ops; we create fresh jobs below.
+  await env.DB.prepare(
+    "UPDATE push_jobs SET status = 'superseded' WHERE batch_id = ? AND action = 'push' AND status IN ('pending','waiting','running')",
+  )
+    .bind(batchId)
+    .run();
+
   const items = (
     await env.DB.prepare(
       `SELECT bi.id, m.target_type FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id
-       WHERE bi.batch_id = ? AND bi.push_status IN ('pending','failed')`,
+       WHERE bi.batch_id = ?
+         AND (
+           bi.push_status IN ('pending','failed')
+           OR (bi.push_status IN ('queued','pushing')
+               AND COALESCE(replace(substr(bi.updated_at,1,19),'T',' '), '') < datetime('now','-2 minutes'))
+         )`,
     )
       .bind(batchId)
       .all<{ id: string; target_type: string }>()
@@ -118,7 +131,7 @@ async function loadItem(env: Env, batchItemId: string): Promise<ItemRow | null> 
 
 export async function processJob(env: Env, jobId: string): Promise<void> {
   const job = await env.DB.prepare("SELECT * FROM push_jobs WHERE id = ?").bind(jobId).first<JobRow>();
-  if (!job || job.status === "done") return;
+  if (!job || job.status === "done" || job.status === "superseded") return;
   await env.DB.prepare("UPDATE push_jobs SET status = 'running', attempts = attempts + 1 WHERE id = ?").bind(jobId).run();
 
   const item = await loadItem(env, job.batch_item_id);
@@ -134,7 +147,10 @@ export async function processJob(env: Env, jobId: string): Promise<void> {
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     const attempts = job.attempts + 1;
-    const final = attempts >= 3;
+    // 4xx (except 429) from Webex won't heal on retry — fail fast.
+    const status = (e as { status?: number }).status;
+    const permanent = typeof status === "number" && status >= 400 && status < 500 && status !== 429;
+    const final = permanent || attempts >= 3;
     await env.DB.prepare("UPDATE push_jobs SET status = ? WHERE id = ?")
       .bind(final ? "failed" : "pending", jobId)
       .run();
