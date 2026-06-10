@@ -82,7 +82,27 @@ mappings.put("/:id/site-mappings", async (c) => {
 // Bulk operations: select/deselect all (optionally by type), set location on all selected.
 mappings.post("/:id/mappings/bulk", async (c) => {
   const projectId = c.req.param("id");
-  const body = await c.req.json<{ action: "select" | "deselect" | "setLocation"; targetType?: string; locationName?: string }>();
+  const body = await c.req.json<{
+    action: "select" | "deselect" | "setLocation" | "setRouteChoice";
+    targetType?: string;
+    locationName?: string;
+    routeChoice?: { type: string; id: string; name: string };
+  }>();
+
+  if (body.action === "setRouteChoice") {
+    if (!body.routeChoice?.id || !body.routeChoice?.type) return c.json({ error: "routeChoice {type,id,name} required" }, 400);
+    const { results } = await c.env.DB.prepare(
+      "SELECT id, target_payload FROM mappings WHERE project_id = ? AND target_type = 'route_pattern'",
+    )
+      .bind(projectId)
+      .all<{ id: string; target_payload: string }>();
+    for (const row of results) {
+      const payload = JSON.parse(row.target_payload);
+      payload.routeChoice = body.routeChoice;
+      await c.env.DB.prepare("UPDATE mappings SET target_payload = ? WHERE id = ?").bind(JSON.stringify(payload), row.id).run();
+    }
+    return c.json({ ok: true, updated: results.length });
+  }
 
   if (body.action === "select" || body.action === "deselect") {
     const sel = body.action === "select" ? 1 : 0;

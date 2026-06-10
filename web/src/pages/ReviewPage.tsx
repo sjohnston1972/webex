@@ -9,7 +9,10 @@ const TYPE_LABELS: Record<string, string> = {
   hunt_group: "Hunt groups",
   call_pickup: "Call pickup groups",
   translation_pattern: "Translation patterns (deselected by default — review digit manipulation)",
+  route_pattern: "Route patterns (→ Webex dial plans, premises PSTN)",
 };
+
+type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
 
 type SiteMapping = { cucmSite: string; phones: number; webexLocation: string | null };
 
@@ -21,6 +24,8 @@ export function ReviewPage() {
   const [msg, setMsg] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [locations, setLocations] = useState<string[]>([]);
   const [location, setLocation] = useState("");
+  const [routeTargets, setRouteTargets] = useState<RouteTarget[]>([]);
+  const [routeTarget, setRouteTarget] = useState("");
 
   const load = useCallback(() => {
     api.get<Mapping[]>(`/api/projects/${projectId}/mappings`).then(setMappings).catch((e) => setMsg({ tone: "error", text: e.message }));
@@ -33,8 +38,32 @@ export function ReviewPage() {
         .get<any[]>(`/api/projects/${projectId}/webex/locations`)
         .then((locs) => setLocations(locs.map((l) => l.name)))
         .catch(() => setLocations([]));
+      api
+        .get<{ trunks: any[]; routeGroups: any[] }>(`/api/projects/${projectId}/webex/pstn`)
+        .then((p) =>
+          setRouteTargets([
+            ...(p.trunks ?? []).map((t) => ({ type: "TRUNK" as const, id: t.id, name: t.name })),
+            ...(p.routeGroups ?? []).map((g) => ({ type: "ROUTE_GROUP" as const, id: g.id, name: g.name })),
+          ]),
+        )
+        .catch(() => setRouteTargets([]));
     }
   }, [projectId, summary.webex]);
+
+  const applyRouteTarget = async () => {
+    const target = routeTargets.find((t) => t.id === routeTarget);
+    if (!target) return;
+    setBusy("route");
+    try {
+      await api.post(`/api/projects/${projectId}/mappings/bulk`, { action: "setRouteChoice", routeChoice: target });
+      setMsg({ tone: "ok", text: `Route patterns will push into dial plan "CUCM via ${target.name}".` });
+      load();
+    } catch (err) {
+      setMsg({ tone: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const generate = async () => {
     setBusy("generate");
@@ -135,7 +164,26 @@ export function ReviewPage() {
             title={TYPE_LABELS[type] ?? type}
             sub={`${rows.filter((r) => r.selected).length} of ${rows.length} selected`}
             actions={
-              <span style={{ display: "inline-flex", gap: 6 }}>
+              <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+                {type === "route_pattern" && (
+                  <>
+                    <select
+                      value={routeTarget}
+                      onChange={(e) => setRouteTarget(e.target.value)}
+                      style={{ padding: "4px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit", fontSize: 12 }}
+                    >
+                      <option value="">Route via…</option>
+                      {routeTargets.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} ({t.type === "TRUNK" ? "trunk" : "route group"})
+                        </option>
+                      ))}
+                    </select>
+                    <button className="btn sm" onClick={applyRouteTarget} disabled={!routeTarget || busy !== null}>
+                      Apply
+                    </button>
+                  </>
+                )}
                 <button className="btn sm" onClick={() => bulkSelect(type, true)}>
                   All
                 </button>
@@ -178,12 +226,15 @@ export function ReviewPage() {
                             {type === "hunt_group" && <div className="dim small">policy: {p.policy}{p.agentEmails?.length ? ` · ${p.agentEmails.length} agents` : ""}</div>}
                             {type === "call_pickup" && <div className="dim small">{p.agentEmails?.length ?? 0} members</div>}
                             {type === "translation_pattern" && <div className="dim small mono">{p.matchingPattern} → {p.replacementPattern ?? "?"}</div>}
+                            {type === "route_pattern" && <div className="dim small mono">{p.cucmPattern} → {p.dialPattern}</div>}
                           </>
                         )}
                       </td>
                       <td className="mono">{type === "translation_pattern" ? (p.cucmPartition ?? "—") : (p.phoneNumber ?? p.extension ?? "—")}</td>
                       <td>
-                        {type === "translation_pattern" ? (
+                        {type === "route_pattern" ? (
+                          p.routeChoice ? <span>{p.routeChoice.name}</span> : <span className="dim">no route target</span>
+                        ) : type === "translation_pattern" ? (
                           <span className="dim">org-wide</span>
                         ) : (
                           <>

@@ -6,6 +6,73 @@ import type { ProjectContext } from "../App";
 
 type Status = { connected: boolean; org_name?: string; org_id?: string; adminEmail?: string; expires_at?: string; error?: string };
 
+type Pstn = {
+  locations: { id: string; name: string; connection: any; options: any[] }[];
+  trunks: any[];
+  routeGroups: any[];
+  dialPlans: any[];
+};
+
+function PstnCard({ projectId }: { projectId: string }) {
+  const [pstn, setPstn] = useState<Pstn | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.get<Pstn>(`/api/projects/${projectId}/webex/pstn`).then(setPstn).catch((e) => setError(e.message));
+  }, [projectId]);
+
+  return (
+    <Card title="PSTN & route targets" sub="how calls leave Webex — targets for migrated route patterns" tight>
+      {error && (
+        <div className="card-body">
+          <Alert tone="error">{error}</Alert>
+        </div>
+      )}
+      {!pstn && !error ? (
+        <div className="card-body">
+          <Spinner />
+        </div>
+      ) : pstn && (
+        <>
+          <table className="data">
+            <thead>
+              <tr>
+                <th>Location</th>
+                <th>PSTN connection</th>
+                <th>Available options</th>
+              </tr>
+            </thead>
+            <tbody>
+              {pstn.locations.map((l) => (
+                <tr key={l.id}>
+                  <td>{l.name}</td>
+                  <td>
+                    {l.connection ? (
+                      <Pill tone="green">{(l.connection as any).type ?? (l.connection as any).name ?? "configured"}</Pill>
+                    ) : (
+                      <Pill tone="grey">none</Pill>
+                    )}
+                  </td>
+                  <td className="notes">
+                    {l.options.length > 0 ? l.options.map((o: any) => o.name ?? o.type ?? o.id).join(" · ") : <span className="dim">—</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="card-body small" style={{ borderTop: "1px solid var(--border)" }}>
+            <strong>Premises routing:</strong>{" "}
+            {pstn.trunks.length} trunk(s) · {pstn.routeGroups.length} route group(s) · {pstn.dialPlans.length} dial plan(s)
+            {pstn.trunks.length + pstn.routeGroups.length === 0 && (
+              <span className="dim"> — route patterns need a Local Gateway trunk or route group before they can push</span>
+            )}
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
 export function WebexPage() {
   const { reload } = useOutletContext<ProjectContext>();
   const { projectId } = useParams();
@@ -69,6 +136,8 @@ export function WebexPage() {
           </>
         )}
       </Card>
+
+      {status?.connected && <PstnCard projectId={projectId!} />}
 
       {status?.connected && (
         <>

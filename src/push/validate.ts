@@ -29,6 +29,14 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
   const locationByName = new Map(locations.map((l: any) => [String(l.name).toLowerCase(), l]));
   const licenses = await client.listLicenses();
   const callingLicense = pickCallingLicense(licenses);
+  // Premises PSTN context for route-pattern items (best effort).
+  let premisesTargets = 0;
+  try {
+    premisesTargets = (await client.listPremisesTrunks()).length + (await client.listPremisesRouteGroups()).length;
+  } catch {
+    premisesTargets = 0;
+  }
+
   const numbers = await client.listNumbers();
   const numberByE164 = new Map(numbers.map((n: any) => [n.phoneNumber, n]));
   const extensionsInUse = new Set(numbers.filter((n: any) => n.owner).map((n: any) => String(n.extension ?? "")));
@@ -108,6 +116,18 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
         } else {
           worsen("amber");
           notes.push("Translation patterns push at org level — verify matching/replacement syntax before pushing");
+        }
+      } else if (item.target_type === "route_pattern") {
+        if (premisesTargets === 0) {
+          worsen("red");
+          notes.push("No premises PSTN trunks or route groups exist in this org — create a Local Gateway trunk first, or use Cloud PSTN and exclude route patterns");
+        }
+        if (!payload.routeChoice?.id) {
+          worsen("red");
+          notes.push("No route target selected — pick a trunk/route group on the Review page");
+        } else {
+          worsen("amber");
+          notes.push(`Will be added to dial plan "CUCM via ${payload.routeChoice.name}" — verify pattern syntax`);
         }
       } else if (item.target_type === "hunt_group" || item.target_type === "call_pickup") {
         checkLocation();

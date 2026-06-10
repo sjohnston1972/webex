@@ -38,6 +38,46 @@ webex.get("/:id/webex/licenses", async (c) => {
   }
 });
 
+// PSTN landscape: per-location connection + options, premises trunks/route groups/dial plans.
+webex.get("/:id/webex/pstn", async (c) => {
+  try {
+    const client = await WebexClient.forProject(c.env, c.req.param("id"));
+    const locations = await client.listLocations();
+    const locationPstn = await Promise.all(
+      locations.map(async (l: any) => {
+        let connection: unknown = null;
+        let options: unknown[] = [];
+        try {
+          connection = await client.getPstnConnection(l.id);
+        } catch {
+          connection = null;
+        }
+        try {
+          options = await client.listPstnConnectionOptions(l.id);
+        } catch {
+          options = [];
+        }
+        return { id: l.id, name: l.name, connection, options };
+      }),
+    );
+    let trunks: any[] = [];
+    let routeGroups: any[] = [];
+    let dialPlans: any[] = [];
+    try {
+      trunks = await client.listPremisesTrunks();
+    } catch { /* premises PSTN APIs may be unavailable on some orgs */ }
+    try {
+      routeGroups = await client.listPremisesRouteGroups();
+    } catch { /* ditto */ }
+    try {
+      dialPlans = await client.listDialPlans();
+    } catch { /* ditto */ }
+    return c.json({ locations: locationPstn, trunks, routeGroups, dialPlans });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
+});
+
 // Create a location in Control Hub and enable it for Webex Calling.
 webex.post("/:id/webex/locations", async (c) => {
   const body = await c.req.json<{ name?: string; timeZone?: string; address?: Record<string, string>; preferredLanguage?: string }>();

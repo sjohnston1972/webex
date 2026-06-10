@@ -16,6 +16,14 @@ const COUNT_LABELS: Record<string, string> = {
   dialplan: "Dial plan objects",
 };
 
+const ELIGIBLE_LABELS: Record<string, string> = {
+  person: "People",
+  hunt_group: "Hunt groups",
+  call_pickup: "Call pickup",
+  translation_pattern: "Translation patterns",
+  route_pattern: "Route patterns",
+};
+
 export function OverviewPage() {
   const { summary } = useOutletContext<ProjectContext>();
   const { projectId } = useParams();
@@ -51,6 +59,22 @@ export function OverviewPage() {
           </div>
         ))}
       </div>
+
+      {(summary.mappingsByType?.length ?? 0) > 0 && (
+        <>
+          <h2 style={{ fontSize: 13, textTransform: "uppercase", letterSpacing: "0.08em", color: "var(--ink-faint)", margin: "4px 0 10px" }}>
+            Eligible for migration
+          </h2>
+          <div className="tiles">
+            {summary.mappingsByType.map((m) => (
+              <div className="tile" key={m.target_type}>
+                <div className="tile-value">{m.n}</div>
+                <div className="tile-label">{ELIGIBLE_LABELS[m.target_type] ?? m.target_type} · {m.selected ?? 0} selected</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       <Card title="Pipeline status">
         <div className="kv">

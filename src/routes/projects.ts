@@ -60,6 +60,11 @@ projects.get("/:id/summary", async (c) => {
   )
     .bind(id)
     .all<{ confidence: string; n: number; selected: number }>();
+  const mappingsByType = await c.env.DB.prepare(
+    `SELECT target_type, COUNT(*) AS n, SUM(selected) AS selected FROM mappings WHERE project_id = ? GROUP BY target_type`,
+  )
+    .bind(id)
+    .all<{ target_type: string; n: number; selected: number }>();
   const batches = await c.env.DB.prepare(
     `SELECT id, name, status, created_at FROM batches WHERE project_id = ? ORDER BY created_at DESC`,
   )
@@ -85,6 +90,7 @@ projects.get("/:id/summary", async (c) => {
     project,
     counts,
     mappings: mappings.results,
+    mappingsByType: mappingsByType.results,
     batches: batches.results,
     snapshots: snapshots.results,
     axl: axl ?? null,

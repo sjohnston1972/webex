@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildTranslationPatternMapping, mapHuntPolicy } from "../src/mapping/engine";
+import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildRoutePatternMapping, buildTranslationPatternMapping, mapHuntPolicy } from "../src/mapping/engine";
 
 const user = (over: Partial<Record<string, string | null>> = {}) => ({
   id: "u1",
@@ -106,6 +106,22 @@ describe("buildTranslationPatternMapping", () => {
 
   it("is red with no transformation at all", () => {
     expect(buildTranslationPatternMapping(tp(), new Set()).confidence).toBe("red");
+  });
+});
+
+describe("buildRoutePatternMapping", () => {
+  it("strips the CUCM pre-dot and flags for review", () => {
+    const { payload, confidence, notes } = buildRoutePatternMapping({ id: "r1", name: "9.XXXXXXXXXX", partition_name: "PT-PSTN", description: "Local calls" });
+    expect(payload.dialPattern).toBe("9XXXXXXXXXX");
+    expect(payload.cucmPattern).toBe("9.XXXXXXXXXX");
+    expect(confidence).toBe("amber");
+    expect(notes.join(" ")).toMatch(/pre-dot stripped/i);
+    expect(payload.routeChoice).toBeNull();
+  });
+
+  it("goes red on characters Webex cannot express", () => {
+    const { confidence } = buildRoutePatternMapping({ id: "r2", name: "9.@", partition_name: null, description: null });
+    expect(confidence).toBe("red");
   });
 });
 

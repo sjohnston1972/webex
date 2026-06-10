@@ -27,7 +27,7 @@ type ItemRow = {
   target_payload: string;
 };
 
-const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern"];
+const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern", "route_pattern"];
 
 export async function startPush(env: Env, projectId: string, batchId: string): Promise<{ queued: number }> {
   await env.DB.prepare("UPDATE batches SET status = 'pushing' WHERE id = ?").bind(batchId).run();
@@ -264,6 +264,18 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
       replacementPattern: payload.replacementPattern,
     })) as any;
     await recordSuccess(env, item.id, result.id, { created: true, type: "translation_pattern" });
+  } else if (item.target_type === "route_pattern") {
+    const rc = payload.routeChoice as { type?: string; id?: string; name?: string } | null;
+    if (!rc?.id || !rc?.type) throw new Error("No route target selected — choose a trunk or route group on the Review page");
+    // One Webex dial plan per route target; create on first use.
+    const planName = `CUCM via ${rc.name ?? rc.id}`.slice(0, 40);
+    const plans = await client.listDialPlans();
+    let plan = plans.find((p: any) => p.name === planName);
+    if (!plan) {
+      plan = (await client.createDialPlan({ name: planName, routeType: rc.type, routeId: rc.id })) as any;
+    }
+    await client.modifyDialPlanPatterns(plan.id, [{ dialPattern: payload.dialPattern, action: "ADD" }]);
+    await recordSuccess(env, item.id, plan.id, { created: true, type: "route_pattern", dialPlanId: plan.id, dialPattern: payload.dialPattern });
   } else {
     throw new Error(`Unsupported target type: ${item.target_type}`);
   }
@@ -282,6 +294,10 @@ async function rollbackItem(env: Env, item: ItemRow): Promise<void> {
     else if (info.type === "hunt_group") await client.deleteHuntGroup(info.locationId, item.webex_resource_id);
     else if (info.type === "call_pickup") await client.deleteCallPickup(info.locationId, item.webex_resource_id);
     else if (info.type === "translation_pattern") await client.deleteTranslationPattern(item.webex_resource_id);
+    else if (info.type === "route_pattern") {
+      // Remove only this pattern; the dial plan itself stays (other patterns may share it).
+      await client.modifyDialPlanPatterns(info.dialPlanId, [{ dialPattern: info.dialPattern, action: "DELETE" }]);
+    }
   } catch (e) {
     // 404 means it's already gone — that's a successful rollback.
     const status = (e as { status?: number }).status;

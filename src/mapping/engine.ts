@@ -216,6 +216,37 @@ export function buildPickupMapping(group: SrcPickup, usersByExtension: Map<strin
   return { payload, confidence, notes };
 }
 
+type SrcRoutePattern = { id: string; name: string; partition_name: string | null; description: string | null };
+
+/**
+ * CUCM route pattern → dial pattern in a Webex premises-PSTN dial plan.
+ * The route target (trunk / route group) is chosen by the engineer on the
+ * Review page; CUCM's "." separator is stripped (Webex has no pre-dot).
+ */
+export function buildRoutePatternMapping(rp: SrcRoutePattern) {
+  const notes: string[] = [];
+  let confidence: "green" | "amber" | "red" = "amber";
+
+  const dialPattern = rp.name.replace(/\./g, "");
+  notes.push("Choose a route target (trunk or route group) — pushed as a dial pattern in a Webex dial plan (premises PSTN)");
+  if (/[^0-9Xx*#!+\[\]\-]/.test(dialPattern)) {
+    confidence = "red";
+    notes.push(`Pattern contains characters with no Webex dial-pattern equivalent: review "${rp.name}"`);
+  }
+  if (rp.name.includes(".")) {
+    notes.push(`CUCM pre-dot stripped (${rp.name} → ${dialPattern}) — confirm digit handling; Webex does not strip access codes`);
+  }
+
+  const payload = {
+    name: rp.description?.trim() || `RP ${rp.name}`,
+    cucmPattern: rp.name,
+    dialPattern,
+    cucmPartition: rp.partition_name,
+    routeChoice: null as { type: string; id: string; name: string } | null,
+  };
+  return { payload, confidence, notes };
+}
+
 /** Most common non-null value, or null. */
 function mostCommon(values: (string | null | undefined)[]): string | null {
   const counts = new Map<string, number>();
@@ -234,6 +265,7 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     ["hunt_pilot", "src_hunt_pilots"],
     ["pickup_group", "src_pickup_groups"],
     ["trans_pattern", "src_trans_patterns"],
+    ["route_pattern", "src_dialplan"],
   ];
   for (const [srcType, table] of orphanCleanup) {
     await env.DB.prepare(
@@ -247,6 +279,11 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   const pilots = (await env.DB.prepare("SELECT * FROM src_hunt_pilots WHERE project_id = ?").bind(projectId).all<SrcHuntPilot>()).results;
   const pickups = (await env.DB.prepare("SELECT * FROM src_pickup_groups WHERE project_id = ?").bind(projectId).all<SrcPickup>()).results;
   const transPatterns = (await env.DB.prepare("SELECT * FROM src_trans_patterns WHERE project_id = ?").bind(projectId).all<SrcTransPattern>()).results;
+  const routePatterns = (
+    await env.DB.prepare("SELECT id, name, partition_name, description FROM src_dialplan WHERE project_id = ? AND object_type = 'route_pattern'")
+      .bind(projectId)
+      .all<SrcRoutePattern>()
+  ).results;
 
   // Site context: a user's site is the device pool (fallback: CUCM location)
   // of their owned phone; the human-confirmed site → Webex location mapping
@@ -340,6 +377,10 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     const { payload, confidence, notes } = buildTranslationPatternMapping(tp, knownExtensions);
     // Deselected by default: digit manipulation always needs engineer review.
     upsert("trans_pattern", tp.id, "translation_pattern", payload, confidence, notes, 0);
+  }
+  for (const rp of routePatterns) {
+    const { payload, confidence, notes } = buildRoutePatternMapping(rp);
+    upsert("route_pattern", rp.id, "route_pattern", payload, confidence, notes);
   }
 
   await batchAll(env.DB, stmts);

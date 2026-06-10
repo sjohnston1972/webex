@@ -207,6 +207,41 @@ export class WebexClient {
     return this.request("DELETE", `/telephony/config/locations/${locationId}/callPickups/${callPickupId}`);
   }
 
+  // --- PSTN / premises routing (dial plan migration) ---
+
+  getPstnConnection(locationId: string) {
+    return this.request("GET", `/telephony/pstn/locations/${locationId}/connection`);
+  }
+
+  async listPstnConnectionOptions(locationId: string): Promise<any[]> {
+    const r = await this.request("GET", `/telephony/pstn/locations/${locationId}/connectionOptions`);
+    return r.items ?? r.connectionOptions ?? [];
+  }
+
+  async listPremisesTrunks(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/premisePstn/trunks", undefined, { max: "500" });
+    return r.trunks ?? [];
+  }
+
+  async listPremisesRouteGroups(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/premisePstn/routeGroups", undefined, { max: "500" });
+    return r.routeGroups ?? [];
+  }
+
+  async listDialPlans(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/premisePstn/dialPlans", undefined, { max: "500" });
+    return r.dialPlans ?? [];
+  }
+
+  createDialPlan(payload: Record<string, unknown>) {
+    return this.request("POST", "/telephony/config/premisePstn/dialPlans", payload);
+  }
+
+  /** Add/remove dial patterns on a dial plan. actions: ADD | DELETE */
+  modifyDialPlanPatterns(dialPlanId: string, dialPatterns: { dialPattern: string; action: "ADD" | "DELETE" }[]) {
+    return this.request("PUT", `/telephony/config/premisePstn/dialPlans/${dialPlanId}/dialPatterns`, { dialPatterns });
+  }
+
   createLocation(payload: Record<string, unknown>) {
     return this.request("POST", "/locations", payload);
   }
