@@ -1,8 +1,10 @@
 # ROADMAP.md — Build Phases
 
-Work one phase at a time. A phase is done when its acceptance criteria pass
-and Steven has seen it working. Do not start the next phase in the same
-session without confirming.
+> **2026-06-10 scope change (Steven):** build the entire v1 autonomously.
+> AXL live pull from CUCM is promoted into v1 ingestion (was Phase 8);
+> users choose which features to migrate. UI is a Meraki-style dashboard
+> (light, clean — not cyber themed). See
+> `docs/superpowers/specs/2026-06-10-v1-full-build-design.md`.
 
 ## Phase 0 — Scaffold
 Worker + Hono + React/Vite frontend deployed via `wrangler`. D1 and R2
