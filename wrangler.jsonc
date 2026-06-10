@@ -13,7 +13,7 @@
   "assets": {
     "directory": "web/dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"]
+    "run_worker_first": ["/api/*", "/auth/*"]
   },
   "vars": {
     "WEBEX_CLIENT_ID": "C8e0d6f08041ce917672bbb3d5d7f13a7a22e8ef4f22e435dcc25e1e2b432800b",
