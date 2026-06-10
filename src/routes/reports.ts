@@ -1,0 +1,63 @@
+import { Hono } from "hono";
+import type { AppContext } from "../env";
+import { toCsv } from "../lib/util";
+
+export const reports = new Hono<AppContext>();
+
+function csvResponse(filename: string, csv: string): Response {
+  return new Response(csv, {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  });
+}
+
+// Pre-migration readiness: every mapping with its confidence and issues.
+reports.get("/:id/reports/readiness.csv", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    "SELECT target_type, target_payload, confidence, selected, status, notes FROM mappings WHERE project_id = ? ORDER BY target_type, confidence",
+  )
+    .bind(c.req.param("id"))
+    .all<{ target_type: string; target_payload: string; confidence: string; selected: number; status: string; notes: string | null }>();
+
+  const rows = results.map((r) => {
+    const p = JSON.parse(r.target_payload);
+    const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
+    return [r.target_type, label, p.extension ?? p.phoneNumber ?? "", p.locationName ?? "", r.confidence, r.selected ? "yes" : "no", r.status, r.notes ?? ""];
+  });
+  return csvResponse(
+    "readiness-report.csv",
+    toCsv(["Object type", "Identity", "Number/Extension", "Webex location", "Readiness", "Selected", "Mapping status", "Issues"], rows),
+  );
+});
+
+reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT m.target_type, m.target_payload, bi.validate_status, bi.validate_notes
+     FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id WHERE bi.batch_id = ?`,
+  )
+    .bind(c.req.param("batchId"))
+    .all<{ target_type: string; target_payload: string; validate_status: string | null; validate_notes: string | null }>();
+  const rows = results.map((r) => {
+    const p = JSON.parse(r.target_payload);
+    const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
+    return [r.target_type, label, r.validate_status ?? "not validated", r.validate_notes ?? ""];
+  });
+  return csvResponse("dry-run-report.csv", toCsv(["Object type", "Identity", "Result", "Notes"], rows));
+});
+
+reports.get("/:id/batches/:batchId/result.csv", async (c) => {
+  const { results } = await c.env.DB.prepare(
+    `SELECT m.target_type, m.target_payload, bi.push_status, bi.webex_resource_id, bi.error_text
+     FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id WHERE bi.batch_id = ?`,
+  )
+    .bind(c.req.param("batchId"))
+    .all<{ target_type: string; target_payload: string; push_status: string; webex_resource_id: string | null; error_text: string | null }>();
+  const rows = results.map((r) => {
+    const p = JSON.parse(r.target_payload);
+    const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
+    return [r.target_type, label, r.push_status, r.webex_resource_id ?? "", r.error_text ?? ""];
+  });
+  return csvResponse("post-push-report.csv", toCsv(["Object type", "Identity", "Push status", "Webex resource ID", "Errors"], rows));
+});

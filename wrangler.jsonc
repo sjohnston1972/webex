@@ -15,6 +15,26 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/api/*"]
   },
+  "vars": {
+    "WEBEX_CLIENT_ID": "C8e0d6f08041ce917672bbb3d5d7f13a7a22e8ef4f22e435dcc25e1e2b432800b",
+    "WEBEX_REDIRECT_URL": "https://webex-migration.clydeford.net/auth/callback"
+  },
+  "queues": {
+    "producers": [
+      {
+        "queue": "webex-push",
+        "binding": "PUSH_QUEUE"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "webex-push",
+        "max_batch_size": 1,
+        "max_concurrency": 1,
+        "max_retries": 3
+      }
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",

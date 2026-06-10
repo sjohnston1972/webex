@@ -10,6 +10,7 @@
     "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
+    "fast-xml-parser": "^5.8.0",
     "hono": "^4.7.0"
   },
   "devDependencies": {
