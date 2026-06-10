@@ -21,7 +21,7 @@ projects.get("/", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT p.*,
        (SELECT COUNT(*) FROM src_users u WHERE u.project_id = p.id) AS user_count,
-       (SELECT COUNT(*) FROM mappings m WHERE m.project_id = p.id AND m.selected = 1) AS selected_count,
+       (SELECT COUNT(*) FROM axl_connections a WHERE a.project_id = p.id AND a.verified_at IS NOT NULL) AS cucm_linked,
        (SELECT COUNT(*) FROM webex_tokens t WHERE t.project_id = p.id) AS webex_connected
      FROM projects p ORDER BY p.created_at DESC`,
   ).all();

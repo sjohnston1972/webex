@@ -61,8 +61,8 @@ export function ProjectsPage() {
               <div className="customer">{p.customer ?? "—"}</div>
               <div className="meta">
                 <Pill tone="grey">{p.user_count ?? 0} users</Pill>
+                <Pill tone={p.cucm_linked ? "green" : "grey"}>{p.cucm_linked ? "CUCM linked" : "CUCM not linked"}</Pill>
                 <Pill tone={p.webex_connected ? "green" : "grey"}>{p.webex_connected ? "Webex linked" : "Webex not linked"}</Pill>
-                <Pill tone={p.selected_count ? "blue" : "grey"}>{p.selected_count ?? 0} selected</Pill>
               </div>
             </Link>
           ))}

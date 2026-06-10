@@ -47,7 +47,7 @@ export type Project = {
   status: string;
   created_at: string;
   user_count?: number;
-  selected_count?: number;
+  cucm_linked?: number;
   webex_connected?: number;
 };
 
