@@ -16,13 +16,16 @@ const STAGES = [
   { path: "", step: "Overview", name: "Status" },
   { path: "source", step: "Stage 1", name: "Source" },
   { path: "review", step: "Stage 2", name: "Review & select" },
-  { path: "dialplan", step: "Stage 3", name: "Dial plan" },
-  { path: "webex", step: "Stage 4", name: "Webex" },
-  { path: "push", step: "Stage 5", name: "Validate & push" },
-  { path: "reports", step: "Stage 6", name: "Reports" },
+  { path: "webex", step: "Stage 3", name: "Webex" },
+  { path: "push", step: "Stage 4", name: "Validate & push" },
+  { path: "reports", step: "Stage 5", name: "Reports" },
 ];
 
 function Sidebar() {
+  const location = useLocation();
+  const projectMatch = location.pathname.match(/^\/projects\/([^/]+)/);
+  const projectId = projectMatch?.[1];
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -36,6 +39,12 @@ function Sidebar() {
         <NavLink to="/" end>
           ⌂ Projects
         </NavLink>
+        {projectId && (
+          <>
+            <div className="nav-section">Reference</div>
+            <NavLink to={`/projects/${projectId}/dialplan`}>☎ Dial plan</NavLink>
+          </>
+        )}
       </nav>
       <div className="sidebar-foot">Cloudflare Workers · D1 · R2</div>
     </aside>
