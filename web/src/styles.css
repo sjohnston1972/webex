@@ -130,7 +130,9 @@ a.crumb:hover { color: var(--green); }
   box-shadow: var(--shadow-card);
   margin-bottom: 18px;
   animation: rise 0.35s ease both;
+  overflow: hidden; /* never let wide tables paint outside the card */
 }
+table.data td { word-break: break-word; }
 .card:nth-of-type(2) { animation-delay: 0.04s; }
 .card:nth-of-type(3) { animation-delay: 0.08s; }
 .card:nth-of-type(4) { animation-delay: 0.12s; }

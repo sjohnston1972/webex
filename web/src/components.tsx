@@ -55,3 +55,15 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
 export function Alert({ tone, children }: { tone: "error" | "ok" | "info"; children: ReactNode }) {
   return <div className={`alert ${tone}`}>{children}</div>;
 }
+
+/** Renders a snapshot's counts_json as readable, wrappable text. */
+export function IngestCounts({ json }: { json: string | null }) {
+  if (!json) return <span className="dim">—</span>;
+  try {
+    const counts = JSON.parse(json) as Record<string, number>;
+    const parts = Object.entries(counts).map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`);
+    return <span className="small" style={{ color: "var(--ink-soft)" }}>{parts.join(" · ")}</span>;
+  } catch {
+    return <span className="mono small">{json}</span>;
+  }
+}

@@ -1,7 +1,7 @@
 import { FormEvent, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api } from "../api";
-import { Alert, Card, Empty, Pill, Spinner } from "../components";
+import { Alert, Card, Empty, IngestCounts, Pill, Spinner } from "../components";
 import type { ProjectContext } from "../App";
 
 export function SourcePage() {
@@ -41,7 +41,7 @@ export function SourcePage() {
                     <Pill tone={s.status === "parsed" ? "green" : s.status === "failed" ? "red" : "blue"}>{s.status}</Pill>
                   </td>
                   <td className="notes">
-                    {s.counts_json && <div className="mono small">{s.counts_json}</div>}
+                    <IngestCounts json={s.counts_json} />
                     {s.error_text && <div className="small" style={{ color: "var(--amber)" }}>{s.error_text}</div>}
                   </td>
                 </tr>

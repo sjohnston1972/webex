@@ -1,6 +1,6 @@
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api } from "../api";
-import { Card, Empty, Pill } from "../components";
+import { Card, Empty, IngestCounts, Pill } from "../components";
 import type { ProjectContext } from "../App";
 import { useState } from "react";
 
@@ -91,7 +91,9 @@ export function OverviewPage() {
           <dt>Webex org</dt>
           <dd>
             {summary.webex ? (
-              <Pill tone="green">{summary.webex.org_name ?? summary.webex.org_id}</Pill>
+              <Pill tone="green">
+                {summary.webex.org_name && !summary.webex.org_name.startsWith("Y2lzY29zcGFyaz") ? summary.webex.org_name : "Connected"}
+              </Pill>
             ) : (
               <>
                 <Pill tone="grey">not connected</Pill> <Link to={`/projects/${projectId}/webex`}>Connect →</Link>
@@ -136,7 +138,7 @@ export function OverviewPage() {
                   <td>
                     <Pill tone={s.status === "parsed" ? "green" : s.status === "failed" ? "red" : "blue"}>{s.status}</Pill>
                   </td>
-                  <td className="mono small">{s.counts_json ?? "—"}</td>
+                  <td><IngestCounts json={s.counts_json} /></td>
                 </tr>
               ))}
             </tbody>
