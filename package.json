@@ -1,0 +1,22 @@
+{
+  "name": "webex-migration",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "dev:web": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "test": "vitest run",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.0",
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "typescript": "~5.8.0",
+    "vitest": "~3.2.0",
+    "wrangler": "^4.0.0"
+  }
+}

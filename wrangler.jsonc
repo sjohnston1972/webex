@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "webex-migration",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "webex_migration",
+      "database_id": "REPLACE_IN_TASK_2"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "UPLOADS",
+      "bucket_name": "webex-migration-uploads"
+    }
+  ]
+}
