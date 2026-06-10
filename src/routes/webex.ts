@@ -70,7 +70,7 @@ webex.post("/:id/webex/locations", async (c) => {
     let calling = true;
     let callingError: string | null = null;
     try {
-      await client.enableLocationCalling({ id: locationId, ...details });
+      await client.enableLocationCalling({ id: locationId, name: body.name.trim(), ...details });
     } catch (e) {
       calling = false;
       callingError = e instanceof Error ? e.message : String(e);

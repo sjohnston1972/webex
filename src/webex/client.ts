@@ -211,8 +211,8 @@ export class WebexClient {
     return this.request("POST", "/locations", payload);
   }
 
-  /** Enable an existing location for Webex Calling (requires full location details). */
-  enableLocationCalling(location: { id: string; timeZone: string; preferredLanguage: string; announcementLanguage: string; address: Record<string, string> }) {
+  /** Enable an existing location for Webex Calling (requires full location details incl. name). */
+  enableLocationCalling(location: { id: string; name: string; timeZone: string; preferredLanguage: string; announcementLanguage: string; address: Record<string, string> }) {
     return this.request("POST", "/telephony/config/locations", location);
   }
 
