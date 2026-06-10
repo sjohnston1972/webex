@@ -193,11 +193,11 @@ function UnityCard({ projectId, unity, onChange }: { projectId: string; unity: P
     }
   };
 
-  const pull = async () => {
-    setBusy("pull");
-    setMsg({ tone: "info", text: "Pulling voicemail users from Unity…" });
+  const pull = async (what: "pull" | "pull-greetings") => {
+    setBusy(what);
+    setMsg({ tone: "info", text: what === "pull" ? "Pulling voicemail users from Unity…" : "Downloading recorded greetings from Unity — this can take a couple of minutes…" });
     try {
-      const r = await api.post<{ counts: Record<string, number>; warnings: string[] }>(`/api/projects/${projectId}/unity/pull`);
+      const r = await api.post<{ counts: Record<string, number>; warnings: string[] }>(`/api/projects/${projectId}/unity/${what}`);
       const detail = Object.entries(r.counts)
         .map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`)
         .join(", ");
@@ -243,8 +243,11 @@ function UnityCard({ projectId, unity, onChange }: { projectId: string; unity: P
             {busy === "test" ? <Spinner /> : "Test connection"}
           </button>
           <div className="grow" />
-          <button className="btn primary" type="button" onClick={pull} disabled={busy !== null || !unity}>
+          <button className="btn primary" type="button" onClick={() => pull("pull")} disabled={busy !== null || !unity}>
             {busy === "pull" ? <Spinner /> : "⤓ Pull mailboxes"}
+          </button>
+          <button className="btn primary" type="button" onClick={() => pull("pull-greetings")} disabled={busy !== null || !unity}>
+            {busy === "pull-greetings" ? <Spinner /> : "⤓ Pull greetings"}
           </button>
         </div>
       </form>

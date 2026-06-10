@@ -3,7 +3,7 @@ import type { AppContext } from "../env";
 import { encrypt } from "../lib/crypto";
 import { nowIso } from "../lib/util";
 import { CupiError } from "../unity/client";
-import { getUnityClient, pullFromUnity } from "../unity/pull";
+import { getUnityClient, pullFromUnity, pullGreetingsFromUnity } from "../unity/pull";
 
 export const unity = new Hono<AppContext>();
 
@@ -49,6 +49,14 @@ unity.post("/:id/unity/test", async (c) => {
 unity.post("/:id/unity/pull", async (c) => {
   try {
     return c.json(await pullFromUnity(c.env, c.req.param("id")));
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+  }
+});
+
+unity.post("/:id/unity/pull-greetings", async (c) => {
+  try {
+    return c.json(await pullGreetingsFromUnity(c.env, c.req.param("id")));
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }

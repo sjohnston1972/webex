@@ -64,6 +64,31 @@ export class UnityClient {
     }
   }
 
+  private async requestBinary(path: string): Promise<ArrayBuffer | null> {
+    const res = await fetch(`${this.baseUrl}/vmrest${path}`, {
+      headers: { Authorization: "Basic " + btoa(`${this.username}:${this.password}`) },
+    });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new CupiError(`CUPI HTTP ${res.status} downloading ${path}`, res.status);
+    return res.arrayBuffer();
+  }
+
+  /** Recorded stream files for a call handler's Standard greeting (empty = no custom recording). */
+  async listGreetingStreams(callHandlerObjectId: string): Promise<{ languageCode: string }[]> {
+    try {
+      const r = await this.request<any>(`/handlers/callhandlers/${callHandlerObjectId}/greetings/Standard/greetingstreamfiles`);
+      return ensureArray(r.GreetingStreamFile).map((g: any) => ({ languageCode: String(g.LanguageCode ?? "1033") }));
+    } catch (e) {
+      if (e instanceof CupiError && e.httpStatus === 404) return [];
+      throw e;
+    }
+  }
+
+  /** Download the Standard greeting WAV, or null if none recorded. */
+  downloadGreeting(callHandlerObjectId: string, languageCode: string): Promise<ArrayBuffer | null> {
+    return this.requestBinary(`/handlers/callhandlers/${callHandlerObjectId}/greetings/Standard/greetingstreamfiles/${languageCode}/audio`);
+  }
+
   /** All voicemail users (paged). */
   async listUsers(): Promise<any[]> {
     const users: any[] = [];
