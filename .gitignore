@@ -4,3 +4,4 @@ dist/
 .wrangler/
 .dev.vars
 tunnel-token.txt
+dcloud-project-id.txt
