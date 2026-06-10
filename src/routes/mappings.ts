@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { generateMappings } from "../mapping/engine";
+import { generateMappings, recheckMapping } from "../mapping/engine";
 
 export const mappings = new Hono<AppContext>();
 
@@ -23,13 +23,15 @@ mappings.patch("/:id/mappings/:mappingId", async (c) => {
   const body = await c.req.json<{ selected?: boolean; payload?: Record<string, unknown> }>();
   const row = await c.env.DB.prepare("SELECT * FROM mappings WHERE id = ? AND project_id = ?")
     .bind(c.req.param("mappingId"), c.req.param("id"))
-    .first<{ target_payload: string }>();
+    .first<{ target_payload: string; target_type: string }>();
   if (!row) return c.json({ error: "not found" }, 404);
 
   if (body.payload !== undefined) {
     const merged = { ...JSON.parse(row.target_payload), ...body.payload };
-    await c.env.DB.prepare("UPDATE mappings SET target_payload = ?, status = 'edited' WHERE id = ?")
-      .bind(JSON.stringify(merged), c.req.param("mappingId"))
+    // Re-run the deterministic checks so a real fix clears the block.
+    const recheck = recheckMapping(row.target_type, merged);
+    await c.env.DB.prepare("UPDATE mappings SET target_payload = ?, status = 'edited', confidence = ?, notes = ? WHERE id = ?")
+      .bind(JSON.stringify(merged), recheck.confidence, recheck.notes.join("\n") || null, c.req.param("mappingId"))
       .run();
   }
   if (body.selected !== undefined) {

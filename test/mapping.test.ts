@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildRoutePatternMapping, buildTranslationPatternMapping, buildWorkspaceMapping, mapHuntPolicy, sanitizeExtension, sanitizePattern } from "../src/mapping/engine";
+import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildRoutePatternMapping, buildTranslationPatternMapping, buildWorkspaceMapping, checkTranslationPatternRules, mapHuntPolicy, recheckMapping, sanitizeExtension, sanitizePattern } from "../src/mapping/engine";
 
 const user = (over: Partial<Record<string, string | null>> = {}) => ({
   id: "u1",
@@ -126,6 +126,50 @@ describe("sanitizePattern / sanitizeExtension", () => {
   it("corrects extensions to plain digits and flags non-numeric leftovers", () => {
     expect(sanitizeExtension("20.01")).toMatchObject({ extension: "2001", valid: true });
     expect(sanitizeExtension("20X1").valid).toBe(false);
+  });
+});
+
+describe("checkTranslationPatternRules (Webex hard rules)", () => {
+  it('rejects "*+" in matching or destination', () => {
+    expect(checkTranslationPatternRules("*+XXXX", null)).toHaveLength(1);
+    expect(checkTranslationPatternRules("8XXX", "*+1234")).toHaveLength(1);
+    expect(checkTranslationPatternRules("8XXX", "1234")).toHaveLength(0);
+  });
+  it("rejects X wildcards in the destination", () => {
+    expect(checkTranslationPatternRules("8XXX", "1XXX").join(" ")).toMatch(/cannot contain X/);
+    expect(checkTranslationPatternRules("8XXX", "1001")).toHaveLength(0);
+  });
+  it("blocks the mapping when the source pattern violates the rules", () => {
+    const { confidence, notes } = buildTranslationPatternMapping(
+      { id: "t9", pattern: "*+XXXX", partition_name: null, description: null, called_party_mask: "1001", prefix_digits: null },
+      new Set(),
+    );
+    expect(confidence).toBe("red");
+    expect(notes.join(" ")).toMatch(/\*\+/);
+  });
+  it("blocks an X-wildcard mask", () => {
+    const { confidence } = buildTranslationPatternMapping(
+      { id: "t10", pattern: "8XXX", partition_name: null, description: null, called_party_mask: "1XXX", prefix_digits: null },
+      new Set(),
+    );
+    expect(confidence).toBe("red");
+  });
+});
+
+describe("recheckMapping (after user edit)", () => {
+  it("clears a translation pattern block once the X wildcard is removed", () => {
+    const before = recheckMapping("translation_pattern", { matchingPattern: "8XXX", replacementPattern: "1XXX" });
+    expect(before.confidence).toBe("red");
+    const after = recheckMapping("translation_pattern", { matchingPattern: "8XXX", replacementPattern: "1001" });
+    expect(after.confidence).toBe("amber"); // fixed — verify-semantics note remains
+  });
+  it("keeps a person blocked while the email is invalid, clears when fixed", () => {
+    expect(recheckMapping("person", { email: "not-an-email", extension: "1001" }).confidence).toBe("red");
+    expect(recheckMapping("person", { email: "a@b.com", extension: "1001" }).confidence).toBe("green");
+  });
+  it("validates route pattern syntax on edit", () => {
+    expect(recheckMapping("route_pattern", { dialPattern: "9@" }).confidence).toBe("red");
+    expect(recheckMapping("route_pattern", { dialPattern: "9XXXXXXXXXX" }).confidence).toBe("amber");
   });
 });
 

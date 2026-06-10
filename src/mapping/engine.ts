@@ -15,6 +15,68 @@ export function sanitizePattern(raw: string): { pattern: string; removed: string
   return { pattern, removed, unsupported };
 }
 
+/** Webex-specific translation pattern rules (learned from the live API/UI). */
+export function checkTranslationPatternRules(matchingPattern: string | null, replacementPattern: string | null): string[] {
+  const issues: string[] = [];
+  if (matchingPattern?.includes("*+")) issues.push(`Webex rejects "*+" in translation patterns — found in matching pattern "${matchingPattern}"`);
+  if (replacementPattern) {
+    if (replacementPattern.includes("*+")) issues.push(`Webex rejects "*+" in translation patterns — found in destination "${replacementPattern}"`);
+    if (/[Xx]/.test(replacementPattern)) issues.push(`Webex destination patterns cannot contain X wildcards — found in "${replacementPattern}"`);
+  }
+  return issues;
+}
+
+/**
+ * Re-evaluate a mapping's payload after a user edit. Returns the new
+ * confidence and notes — a real fix clears the block (shown as "fixed"),
+ * a non-fix stays blocked with the reason.
+ */
+export function recheckMapping(targetType: string, payload: Record<string, any>): { confidence: "green" | "amber" | "red"; notes: string[] } {
+  const notes: string[] = [];
+  let confidence: "green" | "amber" | "red" = "green";
+  const blocked = (note: string) => {
+    confidence = "red";
+    notes.push(note);
+  };
+  const review = (note: string) => {
+    if (confidence !== "red") confidence = "amber";
+    notes.push(note);
+  };
+
+  const checkExtension = (value: unknown, label: string) => {
+    if (value === null || value === undefined || value === "") return;
+    if (!/^\d+$/.test(String(value))) blocked(`${label} "${value}" must be plain digits`);
+  };
+
+  if (targetType === "person") {
+    if (!payload.email) blocked("No email address");
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(payload.email))) blocked(`"${payload.email}" does not look like a valid email`);
+    checkExtension(payload.extension, "Extension");
+    if (payload.phoneNumber && !/^\+\d{7,15}$/.test(String(payload.phoneNumber))) blocked(`Phone number "${payload.phoneNumber}" must be E.164 (+44…)`);
+  } else if (targetType === "workspace") {
+    if (!payload.name) blocked("Workspace needs a name");
+    checkExtension(payload.extension, "Extension");
+    if (payload.phoneNumber && !/^\+\d{7,15}$/.test(String(payload.phoneNumber))) blocked(`Phone number "${payload.phoneNumber}" must be E.164`);
+  } else if (targetType === "hunt_group") {
+    checkExtension(payload.extension, "Hunt group number");
+    if ((payload.unresolvedMembers ?? []).length > 0) review(`${payload.unresolvedMembers.length} member(s) still unresolved`);
+  } else if (targetType === "translation_pattern") {
+    const issues = [
+      ...sanitizePattern(String(payload.matchingPattern ?? "")).unsupported.map((c) => `Matching pattern contains unsupported "${c}"`),
+      ...checkTranslationPatternRules(payload.matchingPattern ?? null, payload.replacementPattern ?? null),
+    ];
+    if (!payload.replacementPattern) blocked("No destination (replacement) pattern");
+    issues.forEach(blocked);
+    review("Verify matching/replacement semantics before pushing");
+  } else if (targetType === "route_pattern") {
+    const fixed = sanitizePattern(String(payload.dialPattern ?? ""));
+    if (!payload.dialPattern) blocked("No dial pattern");
+    fixed.unsupported.forEach((c) => blocked(`Dial pattern contains unsupported "${c}"`));
+    review("Verify pattern; choose/confirm route target before pushing");
+  }
+  return { confidence, notes };
+}
+
 /** Extensions must end up as plain digits; separators are corrected away. */
 export function sanitizeExtension(raw: string): { extension: string; removed: string[]; valid: boolean } {
   const removed = [...new Set(raw.match(/[.\\/\s"'-]/g) ?? [])];
@@ -97,12 +159,20 @@ export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensi
     confidence = "red";
     notes.push(`Matching pattern uses CUCM syntax Webex cannot express: ${matching.unsupported.join(" ")}`);
   }
+  for (const issue of checkTranslationPatternRules(matching.pattern, null)) {
+    confidence = "red";
+    notes.push(issue);
+  }
 
   let replacementPattern: string | null = null;
   if (mask) {
     const fixedMask = sanitizePattern(mask);
     replacementPattern = fixedMask.pattern;
     if (fixedMask.removed.length > 0) notes.push(`Replacement corrected: "${mask}" → "${fixedMask.pattern}"`);
+    for (const issue of checkTranslationPatternRules(null, fixedMask.pattern)) {
+      confidence = "red";
+      notes.push(issue);
+    }
     notes.push("Derived from CUCM called-party transformation mask — verify wildcard semantics match Webex replacement syntax");
     if (knownExtensions.has(mask)) {
       notes.push(`Mask resolves to internal extension ${mask} — if this is a DID alias, assigning the number to the person in Webex may replace this pattern entirely`);

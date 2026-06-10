@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, Mapping } from "../api";
-import { Alert, Card, Empty, Pill, Spinner } from "../components";
+import { Alert, Card, Empty, Modal, Pill, Spinner } from "../components";
 import type { ProjectContext } from "../App";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -15,6 +15,42 @@ const TYPE_LABELS: Record<string, string> = {
 
 type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
 
+// Editable payload fields per mapping type — every pattern is user-correctable.
+const EDIT_FIELDS: Record<string, { key: string; label: string; hint?: string }[]> = {
+  person: [
+    { key: "email", label: "Email" },
+    { key: "firstName", label: "First name" },
+    { key: "lastName", label: "Last name" },
+    { key: "extension", label: "Extension", hint: "plain digits" },
+    { key: "phoneNumber", label: "Phone number", hint: "E.164, e.g. +442071234567" },
+    { key: "locationName", label: "Webex location" },
+  ],
+  workspace: [
+    { key: "name", label: "Workspace name" },
+    { key: "extension", label: "Extension", hint: "plain digits" },
+    { key: "phoneNumber", label: "Phone number", hint: "E.164" },
+    { key: "locationName", label: "Webex location" },
+  ],
+  hunt_group: [
+    { key: "name", label: "Hunt group name" },
+    { key: "extension", label: "Number / extension", hint: "plain digits" },
+    { key: "locationName", label: "Webex location" },
+  ],
+  call_pickup: [
+    { key: "name", label: "Pickup group name" },
+    { key: "locationName", label: "Webex location" },
+  ],
+  translation_pattern: [
+    { key: "name", label: "Name" },
+    { key: "matchingPattern", label: "Matching pattern", hint: 'no "*+"' },
+    { key: "replacementPattern", label: "Destination pattern", hint: 'no "*+", no X wildcards' },
+  ],
+  route_pattern: [
+    { key: "name", label: "Name" },
+    { key: "dialPattern", label: "Dial pattern", hint: "digits, X, [], !, *, #, +" },
+  ],
+};
+
 type SiteMapping = { cucmSite: string; phones: number; webexLocation: string | null };
 
 export function ReviewPage() {
@@ -27,6 +63,7 @@ export function ReviewPage() {
   const [location, setLocation] = useState("");
   const [routeTargets, setRouteTargets] = useState<RouteTarget[]>([]);
   const [routeTarget, setRouteTarget] = useState("");
+  const [editing, setEditing] = useState<Mapping | null>(null);
 
   const load = useCallback(() => {
     api.get<Mapping[]>(`/api/projects/${projectId}/mappings`).then(setMappings).catch((e) => setMsg({ tone: "error", text: e.message }));
@@ -205,6 +242,7 @@ export function ReviewPage() {
                   <th>Location</th>
                   <th>Readiness</th>
                   <th>Notes</th>
+                  <th style={{ width: 44 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -246,15 +284,22 @@ export function ReviewPage() {
                         )}
                       </td>
                       <td>
-                        <Pill tone={m.confidence}>{m.confidence === "green" ? "ready" : m.confidence === "amber" ? "review" : "blocked"}</Pill>
-                        {m.status === "edited" && (
-                          <>
-                            {" "}
-                            <Pill tone="blue">edited</Pill>
-                          </>
-                        )}
+                        <Pill tone={m.confidence}>
+                          {m.confidence === "red"
+                            ? "blocked"
+                            : m.status === "edited"
+                              ? "fixed"
+                              : m.confidence === "amber"
+                                ? "review"
+                                : "ready"}
+                        </Pill>
                       </td>
                       <td className="notes">{m.notes ?? ""}</td>
+                      <td>
+                        <button className="btn sm" onClick={() => setEditing(m)} title="Edit this mapping">
+                          ✎
+                        </button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -264,7 +309,70 @@ export function ReviewPage() {
           </Card>
         ))
       )}
+
+      {editing && (
+        <EditMappingModal
+          projectId={projectId!}
+          mapping={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
     </>
+  );
+}
+
+function EditMappingModal({ projectId, mapping, onClose, onSaved }: { projectId: string; mapping: Mapping; onClose: () => void; onSaved: () => void }) {
+  const initial = JSON.parse(mapping.target_payload);
+  const fields = EDIT_FIELDS[mapping.target_type] ?? [{ key: "name", label: "Name" }];
+  const [values, setValues] = useState<Record<string, string>>(
+    Object.fromEntries(fields.map((f) => [f.key, initial[f.key] ?? ""])),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      for (const f of fields) payload[f.key] = values[f.key].trim() === "" ? null : values[f.key].trim();
+      await api.patch(`/api/projects/${projectId}/mappings/${mapping.id}`, { payload });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal title={`Edit ${mapping.target_type.replace(/_/g, " ")}`} onClose={onClose}>
+      {error && <Alert tone="error">{error}</Alert>}
+      {mapping.notes && (
+        <Alert tone="info">
+          <span className="small">{mapping.notes}</span>
+        </Alert>
+      )}
+      {fields.map((f) => (
+        <div className="field" key={f.key}>
+          <label>{f.label}</label>
+          <input value={values[f.key]} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} />
+          {f.hint && <div className="hint">{f.hint}</div>}
+        </div>
+      ))}
+      <div className="toolbar">
+        <div className="grow" />
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" onClick={save} disabled={busy}>
+          {busy ? <Spinner /> : "Save & re-check"}
+        </button>
+      </div>
+    </Modal>
   );
 }
 
