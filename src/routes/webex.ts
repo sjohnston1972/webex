@@ -44,8 +44,7 @@ webex.post("/:id/webex/locations", async (c) => {
   if (!body.name?.trim()) return c.json({ error: "name is required" }, 400);
   try {
     const client = await WebexClient.forProject(c.env, c.req.param("id"));
-    const location = (await client.createLocation({
-      name: body.name.trim(),
+    const details = {
       timeZone: body.timeZone ?? "Europe/London",
       preferredLanguage: body.preferredLanguage ?? "en_GB",
       announcementLanguage: body.preferredLanguage ?? "en_GB",
@@ -55,16 +54,28 @@ webex.post("/:id/webex/locations", async (c) => {
         postalCode: "EC1A 1AA",
         country: "GB",
       },
-    })) as any;
+    };
+    // Create, or reuse an existing location with the same name.
+    let locationId: string;
+    try {
+      const created = (await client.createLocation({ name: body.name.trim(), ...details })) as any;
+      locationId = created.id;
+    } catch (e) {
+      const existing = (await client.listLocations()).find(
+        (l: any) => String(l.name).toLowerCase() === body.name!.trim().toLowerCase(),
+      );
+      if (!existing) throw e;
+      locationId = existing.id;
+    }
     let calling = true;
     let callingError: string | null = null;
     try {
-      await client.enableLocationCalling(location.id);
+      await client.enableLocationCalling({ id: locationId, ...details });
     } catch (e) {
       calling = false;
       callingError = e instanceof Error ? e.message : String(e);
     }
-    return c.json({ id: location.id, name: body.name.trim(), callingEnabled: calling, callingError }, 201);
+    return c.json({ id: locationId, name: body.name.trim(), callingEnabled: calling, callingError }, 201);
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
   }
