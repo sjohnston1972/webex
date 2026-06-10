@@ -2,7 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "webex-migration",
   "main": "src/index.ts",
-  "compatibility_date": "2026-06-01",
+  "compatibility_date": "2025-09-06",
   "d1_databases": [
     {
       "binding": "DB",
