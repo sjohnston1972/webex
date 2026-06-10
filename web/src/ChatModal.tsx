@@ -87,7 +87,7 @@ export function ChatModal({ projectId, mapping, onClose }: { projectId: string; 
   const label = mapping.target_type === "person" ? (p.email ?? p.displayName) : (p.name ?? p.matchingPattern ?? p.cucmPattern);
 
   return (
-    <Modal title="Migration assistant" onClose={onClose}>
+    <Modal title="Migration assistant" onClose={onClose} wide>
       <div className="chat-modal">
         <div className="chat-context">
           {mapping.target_type.replace(/_/g, " ")} · <strong>{label}</strong> ·{" "}

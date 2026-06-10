@@ -69,6 +69,7 @@ export type Summary = {
     parsed_at: string | null;
   }[];
   axl: { base_url: string; username: string; cucm_version: string | null; verified_at: string | null } | null;
+  unity: { base_url: string; username: string; unity_version: string | null; verified_at: string | null } | null;
   webex: { org_id: string | null; org_name: string | null; expires_at: string; updated_at: string } | null;
 };
 

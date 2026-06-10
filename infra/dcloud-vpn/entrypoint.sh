@@ -26,6 +26,11 @@ ip -4 addr show tun0 | grep inet
 echo "[dcloud-vpn] forwarding :8443 -> ${CUCM_IP}:8443 (CUCM AXL/admin)"
 socat TCP-LISTEN:8443,fork,reuseaddr TCP:"${CUCM_IP}":8443 &
 
+if [ -n "${UNITY_IP}" ]; then
+  echo "[dcloud-vpn] forwarding :8444 -> ${UNITY_IP}:443 (Unity CUPI)"
+  socat TCP-LISTEN:8444,fork,reuseaddr TCP:"${UNITY_IP}":443 &
+fi
+
 # Keep the container alive while the VPN process lives; die if it dies so
 # docker restart policy reconnects us.
 while kill -0 "$(cat /tmp/oc.pid)" 2>/dev/null; do sleep 5; done

@@ -82,6 +82,11 @@ projects.get("/:id/summary", async (c) => {
   )
     .bind(id)
     .first();
+  const unity = await c.env.DB.prepare(
+    `SELECT base_url, username, unity_version, verified_at FROM unity_connections WHERE project_id = ?`,
+  )
+    .bind(id)
+    .first();
   const webex = await c.env.DB.prepare(
     `SELECT org_id, org_name, scopes, expires_at, updated_at FROM webex_tokens WHERE project_id = ?`,
   )
@@ -97,6 +102,7 @@ projects.get("/:id/summary", async (c) => {
     batches: batches.results,
     snapshots: snapshots.results,
     axl: axl ?? null,
+    unity: unity ?? null,
     webex: webex ?? null,
   });
 });
@@ -124,6 +130,7 @@ projects.delete("/:id", async (c) => {
     "batches",
     "source_snapshots",
     "axl_connections",
+    "unity_connections",
     "webex_tokens",
     "site_mappings",
   ];

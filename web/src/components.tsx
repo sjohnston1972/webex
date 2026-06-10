@@ -36,10 +36,10 @@ export function Spinner() {
   return <span className="spinner" aria-label="loading" />;
 }
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="scrim" onClick={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className={wide ? "modal modal-wide" : "modal"}>
         <div className="card-head">
           <h2 className="card-title">{title}</h2>
           <button className="btn sm" style={{ marginLeft: "auto" }} onClick={onClose}>

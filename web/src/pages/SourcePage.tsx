@@ -15,6 +15,7 @@ export function SourcePage() {
         <p className="page-desc">Pull configuration live from CUCM over AXL, or upload BAT/Unity export files.</p>
       </div>
       <AxlCard projectId={projectId!} axl={summary.axl} onChange={reload} />
+      <UnityCard projectId={projectId!} unity={summary.unity} onChange={reload} />
       <UploadCard projectId={projectId!} onChange={reload} />
       <Card title="Ingest history" sub={`${summary.snapshots.length} ingest${summary.snapshots.length === 1 ? "" : "s"}`} tight>
         {summary.snapshots.length === 0 ? (
@@ -148,6 +149,102 @@ function AxlCard({ projectId, axl, onChange }: { projectId: string; axl: Project
           <div className="grow" />
           <button className="btn primary" type="button" onClick={pull} disabled={busy !== null || !axl}>
             {busy === "pull" ? <Spinner /> : "⤓ Pull configuration"}
+          </button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+function UnityCard({ projectId, unity, onChange }: { projectId: string; unity: ProjectContext["summary"]["unity"]; onChange: () => void }) {
+  const [baseUrl, setBaseUrl] = useState(unity?.base_url ?? "");
+  const [username, setUsername] = useState(unity?.username ?? "");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy("save");
+    setMsg(null);
+    try {
+      await api.put(`/api/projects/${projectId}/unity`, { baseUrl, username, password: password || undefined });
+      setMsg({ tone: "ok", text: "Connection saved. Test it to verify reachability." });
+      setPassword("");
+      onChange();
+    } catch (err) {
+      setMsg({ tone: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const test = async () => {
+    setBusy("test");
+    setMsg(null);
+    try {
+      const r = await api.post<{ ok: boolean; unityVersion?: string; error?: string }>(`/api/projects/${projectId}/unity/test`);
+      setMsg(r.ok ? { tone: "ok", text: `Connected — Unity ${r.unityVersion}` } : { tone: "error", text: r.error ?? "Failed" });
+      onChange();
+    } catch (err) {
+      setMsg({ tone: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const pull = async () => {
+    setBusy("pull");
+    setMsg({ tone: "info", text: "Pulling voicemail users from Unity…" });
+    try {
+      const r = await api.post<{ counts: Record<string, number>; warnings: string[] }>(`/api/projects/${projectId}/unity/pull`);
+      const detail = Object.entries(r.counts)
+        .map(([k, v]) => `${v} ${k.replace(/_/g, " ")}`)
+        .join(", ");
+      setMsg({ tone: "ok", text: `Pull complete: ${detail}${r.warnings.length ? ` — ${r.warnings.join("; ")}` : ""}` });
+      onChange();
+    } catch (err) {
+      setMsg({ tone: "error", text: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card
+      title="Unity Connection via CUPI"
+      sub={unity?.verified_at ? `verified ${new Date(unity.verified_at).toLocaleString()} · ${unity.unity_version ?? ""}` : "voicemail boxes"}
+    >
+      {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
+      <form onSubmit={save}>
+        <div className="form-row">
+          <div className="field">
+            <label>CUPI base URL</label>
+            <input value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://unity-cupi.example.com" required />
+            <div className="hint">Unity serves REST at /vmrest on 443 — front it with the same Cloudflare Tunnel as CUCM.</div>
+          </div>
+        </div>
+        <div className="form-row">
+          <div className="field">
+            <label>Username</label>
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="administrator" required />
+          </div>
+          <div className="field">
+            <label>Password {unity ? "(leave blank to keep saved)" : ""}</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder={unity ? "••••••••" : ""} />
+            <div className="hint">Stored encrypted (AES-256-GCM). Greeting WAVs still come via file upload.</div>
+          </div>
+        </div>
+        <div className="toolbar">
+          <button className="btn" type="submit" disabled={busy !== null}>
+            {busy === "save" ? <Spinner /> : "Save connection"}
+          </button>
+          <button className="btn" type="button" onClick={test} disabled={busy !== null || !unity}>
+            {busy === "test" ? <Spinner /> : "Test connection"}
+          </button>
+          <div className="grow" />
+          <button className="btn primary" type="button" onClick={pull} disabled={busy !== null || !unity}>
+            {busy === "pull" ? <Spinner /> : "⤓ Pull mailboxes"}
           </button>
         </div>
       </form>

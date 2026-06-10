@@ -292,23 +292,22 @@ export function ReviewPage() {
                         )}
                       </td>
                       <td>
-                        <Pill tone={m.confidence}>
-                          {m.confidence === "red"
-                            ? "blocked"
-                            : m.status === "edited"
-                              ? "fixed"
-                              : m.confidence === "amber"
-                                ? "review"
-                                : "ready"}
-                        </Pill>
-                        {(m.confidence === "red" || m.confidence === "amber") && (
-                          <>
-                            {" "}
+                        <span className="pill-row">
+                          <Pill tone={m.confidence}>
+                            {m.confidence === "red"
+                              ? "blocked"
+                              : m.status === "edited"
+                                ? "fixed"
+                                : m.confidence === "amber"
+                                  ? "review"
+                                  : "ready"}
+                          </Pill>
+                          {(m.confidence === "red" || m.confidence === "amber") && (
                             <button className="chat-pill" onClick={() => setChatWith(m)} title="Ask the migration assistant">
                               ✦ chat
                             </button>
-                          </>
-                        )}
+                          )}
+                        </span>
                       </td>
                       <td className="notes">{m.notes ?? ""}</td>
                       <td>
