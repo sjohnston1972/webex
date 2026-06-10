@@ -1,6 +1,7 @@
 import { BrowserRouter, Link, NavLink, Outlet, Route, Routes, useLocation, useParams } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import { api, Summary } from "./api";
+import { Landing } from "./Landing";
 import { ProjectsPage } from "./pages/ProjectsPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { SourcePage } from "./pages/SourcePage";
@@ -111,6 +112,23 @@ function ProjectShell() {
 }
 
 export default function App() {
+  const [unlocked, setUnlocked] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ ok: boolean }>("/api/pin/status")
+      .then((r) => setUnlocked(r.ok))
+      .catch(() => setUnlocked(false));
+  }, []);
+
+  if (unlocked === null)
+    return (
+      <div className="landing">
+        <span className="spinner" />
+      </div>
+    );
+  if (!unlocked) return <Landing onUnlocked={() => setUnlocked(true)} />;
+
   return (
     <BrowserRouter>
       <div className="frame">

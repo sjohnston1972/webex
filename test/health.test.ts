@@ -1,5 +1,6 @@
 import { SELF } from "cloudflare:test";
 import { expect, it } from "vitest";
+import { authedFetch } from "./helpers";
 
 it("GET /api/health reports ok with working D1 and R2 bindings", async () => {
   const res = await SELF.fetch("http://example.com/api/health");
@@ -11,7 +12,9 @@ it("GET /api/health reports ok with working D1 and R2 bindings", async () => {
   expect(typeof body.time).toBe("string");
 });
 
-it("unknown /api route returns 404", async () => {
-  const res = await SELF.fetch("http://example.com/api/nope");
+it("unknown /api route returns 401 without a PIN session, 404 with one", async () => {
+  const gated = await SELF.fetch("http://example.com/api/nope");
+  expect(gated.status).toBe(401);
+  const res = await authedFetch("http://example.com/api/nope");
   expect(res.status).toBe(404);
 });

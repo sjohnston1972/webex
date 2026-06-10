@@ -19,6 +19,9 @@
     "WEBEX_CLIENT_ID": "C8e0d6f08041ce917672bbb3d5d7f13a7a22e8ef4f22e435dcc25e1e2b432800b",
     "WEBEX_REDIRECT_URL": "https://webex-migration.clydeford.net/auth/callback"
   },
+  "ai": {
+    "binding": "AI"
+  },
   "queues": {
     "producers": [
       {

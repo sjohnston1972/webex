@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, Mapping } from "../api";
 import { Alert, Card, Empty, Modal, Pill, Spinner } from "../components";
+import { ChatModal } from "../ChatModal";
 import type { ProjectContext } from "../App";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -64,6 +65,7 @@ export function ReviewPage() {
   const [routeTargets, setRouteTargets] = useState<RouteTarget[]>([]);
   const [routeTarget, setRouteTarget] = useState("");
   const [editing, setEditing] = useState<Mapping | null>(null);
+  const [chatWith, setChatWith] = useState<Mapping | null>(null);
 
   const load = useCallback(() => {
     api.get<Mapping[]>(`/api/projects/${projectId}/mappings`).then(setMappings).catch((e) => setMsg({ tone: "error", text: e.message }));
@@ -293,6 +295,14 @@ export function ReviewPage() {
                                 ? "review"
                                 : "ready"}
                         </Pill>
+                        {(m.confidence === "red" || m.confidence === "amber") && (
+                          <>
+                            {" "}
+                            <button className="chat-pill" onClick={() => setChatWith(m)} title="Ask the migration assistant">
+                              ✦ chat
+                            </button>
+                          </>
+                        )}
                       </td>
                       <td className="notes">{m.notes ?? ""}</td>
                       <td>
@@ -309,6 +319,8 @@ export function ReviewPage() {
           </Card>
         ))
       )}
+
+      {chatWith && <ChatModal projectId={projectId!} mapping={chatWith} onClose={() => setChatWith(null)} />}
 
       {editing && (
         <EditMappingModal

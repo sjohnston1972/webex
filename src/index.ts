@@ -1,5 +1,9 @@
 import { Hono } from "hono";
+import { getCookie } from "hono/cookie";
 import type { AppContext, Env } from "./env";
+import { verifySession } from "./lib/pin";
+import { ai } from "./routes/ai";
+import { pin } from "./routes/pin";
 import { auth } from "./routes/auth";
 import { axl } from "./routes/axl";
 import { batches } from "./routes/batches";
@@ -31,7 +35,26 @@ app.get("/api/health", async (c) => {
   return c.json({ ok, d1, r2, time: new Date().toISOString() }, ok ? 200 : 503);
 });
 
+app.route("/api/pin", pin);
+
+// PIN gate: everything except health and the PIN endpoints needs a session.
+app.use("/api/*", async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path === "/api/health" || path.startsWith("/api/pin")) return next();
+  if (!(await verifySession(c.env.ENC_KEY, getCookie(c, "wx_pin")))) {
+    return c.json({ error: "PIN required", code: "pin_required" }, 401);
+  }
+  return next();
+});
+app.use("/auth/*", async (c, next) => {
+  if (!(await verifySession(c.env.ENC_KEY, getCookie(c, "wx_pin")))) {
+    return c.text("PIN required — open the app and sign in first", 401);
+  }
+  return next();
+});
+
 app.route("/auth", auth);
+app.route("/api/projects", ai);
 app.route("/api/projects", projects);
 app.route("/api/projects", ingest);
 app.route("/api/projects", axl);
