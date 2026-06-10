@@ -16,10 +16,11 @@ export function SourcePage() {
       </div>
       <AxlCard projectId={projectId!} axl={summary.axl} onChange={reload} />
       <UploadCard projectId={projectId!} onChange={reload} />
-      <Card title="Ingest history" tight>
+      <Card title="Ingest history" sub={`${summary.snapshots.length} ingest${summary.snapshots.length === 1 ? "" : "s"}`} tight>
         {summary.snapshots.length === 0 ? (
           <Empty>Nothing ingested yet.</Empty>
         ) : (
+          <div className="scroll-y">
           <table className="data">
             <thead>
               <tr>
@@ -47,6 +48,7 @@ export function SourcePage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </Card>
     </>

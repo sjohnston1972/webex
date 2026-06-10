@@ -146,6 +146,7 @@ export function ReviewPage() {
             }
             tight
           >
+            <div className="scroll-y" style={{ maxHeight: 480 }}>
             <table className="data">
               <thead>
                 <tr>
@@ -206,6 +207,7 @@ export function ReviewPage() {
                 })}
               </tbody>
             </table>
+            </div>
           </Card>
         ))
       )}

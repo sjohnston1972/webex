@@ -77,6 +77,7 @@ export function DialPlanPage() {
           const items = grouped.get(type)!;
           return (
             <Card key={type} title={label} sub={`${items.length}`} tight>
+              <div className="scroll-y">
               <table className="data">
                 <thead>
                   <tr>
@@ -97,6 +98,7 @@ export function DialPlanPage() {
                   ))}
                 </tbody>
               </table>
+              </div>
             </Card>
           );
         })

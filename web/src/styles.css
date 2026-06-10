@@ -194,6 +194,13 @@ table.data tr:hover td { background: #f8fafb; }
 .small { font-size: 12px; }
 td.notes { color: var(--ink-soft); font-size: 12px; max-width: 360px; }
 
+/* scrollable table region inside a card (sticky header) */
+.scroll-y {
+  max-height: 360px;
+  overflow-y: auto;
+}
+.scroll-y table.data th { position: sticky; top: 0; z-index: 1; }
+
 /* ── Pills & badges ────────────────────────────────────────────────── */
 .pill {
   display: inline-flex;
