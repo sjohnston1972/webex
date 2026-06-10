@@ -202,8 +202,12 @@ function UploadCard({ projectId, onChange }: { projectId: string; onChange: () =
           </div>
           <div className="field">
             <label>Files</label>
-            <input ref={fileRef} type="file" multiple accept=".csv,.txt" />
-            <div className="hint">Headers are auto-detected (users, phones, lines, mailboxes).</div>
+            <input ref={fileRef} type="file" multiple accept=".csv,.txt,.wav,.zip" />
+            <div className="hint">
+              CSVs are auto-detected (users, phones, lines, mailboxes). Unity greetings: WAV files (or a zip of them) named{" "}
+              <span className="mono">&lt;alias&gt;.wav</span> or <span className="mono">&lt;extension&gt;.wav</span> — upload the mailbox CSV
+              first.
+            </div>
           </div>
         </div>
         <button className="btn" type="submit" disabled={busy}>

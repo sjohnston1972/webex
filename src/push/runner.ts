@@ -200,6 +200,10 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     const existing = payload.email ? await client.findPersonByEmail(payload.email) : null;
     if (existing) {
       await recordSuccess(env, item.id, existing.id, { created: false, note: "already existed" });
+      if (payload.voicemail) {
+        await appendError(env, item.id, "Person already existed — applied voicemail settings to the existing person");
+        await applyVoicemail(env, client, item.id, existing.id, payload);
+      }
       return;
     }
     const loc = await resolveLocation();
@@ -220,14 +224,7 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
 
     const person = (await client.createPerson(body)) as any;
     await recordSuccess(env, item.id, person.id, { created: true, type: "person" });
-
-    if (payload.voicemail) {
-      try {
-        await client.setVoicemail(person.id, true);
-      } catch (e) {
-        await appendError(env, item.id, `Person created, but enabling voicemail failed: ${e instanceof Error ? e.message : e}`);
-      }
-    }
+    await applyVoicemail(env, client, item.id, person.id, payload);
   } else if (item.target_type === "workspace") {
     const loc = await resolveLocation();
     const calling: Record<string, unknown> = { locationId: loc.id };
@@ -300,6 +297,30 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     await recordSuccess(env, item.id, plan.id, { created: true, type: "route_pattern", dialPlanId: plan.id, dialPattern: payload.dialPattern });
   } else {
     throw new Error(`Unsupported target type: ${item.target_type}`);
+  }
+}
+
+/** Enable voicemail and, when a Unity greeting was matched, upload it as the no-answer greeting. */
+async function applyVoicemail(env: Env, client: WebexClient, itemId: string, personId: string, payload: Record<string, any>): Promise<void> {
+  if (!payload.voicemail) return;
+  try {
+    await client.setVoicemail(personId, true, false);
+  } catch (e) {
+    await appendError(env, itemId, `Enabling voicemail failed: ${e instanceof Error ? e.message : e}`);
+    return;
+  }
+  if (!payload.greetingKey) return;
+  try {
+    const obj = await env.UPLOADS.get(payload.greetingKey);
+    if (!obj) {
+      await appendError(env, itemId, `Greeting file missing from storage (${payload.greetingKey})`);
+      return;
+    }
+    await client.uploadVoicemailGreeting(personId, await obj.arrayBuffer(), payload.greetingKey.split("/").pop() ?? "greeting.wav");
+    await client.setVoicemail(personId, true, true);
+  } catch (e) {
+    // Format problems (Webex wants CCITT u-law 8kHz mono WAV) surface here verbatim — flagged, never transcoded.
+    await appendError(env, itemId, `Voicemail enabled, but greeting upload failed: ${e instanceof Error ? e.message : e}`);
   }
 }
 

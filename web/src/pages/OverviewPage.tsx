@@ -12,6 +12,7 @@ const COUNT_LABELS: Record<string, string> = {
   hunt_members: "Hunt members",
   pickup_groups: "Pickup groups",
   vm_boxes: "Unity mailboxes",
+  vm_greetings: "Greeting files",
   trans_patterns: "Translation patterns",
   dialplan: "Dial plan objects",
 };

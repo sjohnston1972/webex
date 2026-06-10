@@ -1,6 +1,8 @@
 import { Hono } from "hono";
-import type { AppContext } from "../env";
+import { unzipSync } from "fflate";
+import type { AppContext, Env } from "../env";
 import { parseExport } from "../parsers/csv";
+import { matchGreeting, VmBoxRef } from "../parsers/greetings";
 import { batchAll, nowIso, uuid } from "../lib/util";
 
 export const ingest = new Hono<AppContext>();
@@ -56,8 +58,28 @@ ingest.post("/:id/snapshots/:snapshotId/parse", async (c) => {
         continue;
       }
       const filename = obj.customMetadata?.filename ?? key;
+      if (/\.wav$/i.test(filename)) {
+        const matched = await storeGreeting(c.env, projectId, snapshotId, filename, key, warnings);
+        counts.vm_greetings = (counts.vm_greetings ?? 0) + (matched ? 1 : 0);
+        continue;
+      }
+      if (/\.zip$/i.test(filename)) {
+        try {
+          const entries = unzipSync(new Uint8Array(await obj.arrayBuffer()));
+          for (const [entryName, bytes] of Object.entries(entries)) {
+            if (!/\.wav$/i.test(entryName) || bytes.length === 0) continue;
+            const wavKey = `projects/${projectId}/greetings/${Date.now()}-${entryName.split("/").pop()!.replace(/[^\w.\-]+/g, "_")}`;
+            await c.env.UPLOADS.put(wavKey, bytes, { customMetadata: { filename: entryName } });
+            const matched = await storeGreeting(c.env, projectId, snapshotId, entryName, wavKey, warnings);
+            counts.vm_greetings = (counts.vm_greetings ?? 0) + (matched ? 1 : 0);
+          }
+        } catch (e) {
+          warnings.push(`${filename}: could not extract zip (${e instanceof Error ? e.message : e})`);
+        }
+        continue;
+      }
       if (!/\.(csv|txt)$/i.test(filename)) {
-        warnings.push(`${filename}: not a CSV — skipped (zips/WAVs are handled in the voicemail phase)`);
+        warnings.push(`${filename}: unsupported file type — upload CSVs, WAVs or a zip of WAVs`);
         continue;
       }
       const { kind, rows } = parseExport(await obj.text());
@@ -120,6 +142,22 @@ ingest.post("/:id/snapshots/:snapshotId/parse", async (c) => {
     return c.json({ error: msg }, 500);
   }
 });
+
+/** Store a greeting WAV row, matching it to a mailbox by filename. Returns true if matched. */
+async function storeGreeting(env: Env, projectId: string, snapshotId: string, filename: string, r2Key: string, warnings: string[]): Promise<boolean> {
+  const boxes = (
+    await env.DB.prepare("SELECT alias, extension FROM src_vm_boxes WHERE project_id = ?").bind(projectId).all<VmBoxRef>()
+  ).results;
+  if (boxes.length === 0) warnings.push("No Unity mailboxes parsed yet — upload the mailbox CSV first so greetings can be matched");
+  const alias = matchGreeting(filename, boxes);
+  await env.DB.prepare(
+    "INSERT INTO src_vm_greetings (id, project_id, snapshot_id, filename, r2_key, matched_alias) VALUES (?, ?, ?, ?, ?, ?)",
+  )
+    .bind(uuid(), projectId, snapshotId, filename, r2Key, alias)
+    .run();
+  if (!alias) warnings.push(`Greeting "${filename}": no mailbox matches its name (expected <alias>.wav or <extension>.wav) — orphaned`);
+  return alias !== null;
+}
 
 // List parsed source objects for review tables.
 const OBJECT_TABLES: Record<string, string> = {

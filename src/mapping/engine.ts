@@ -123,7 +123,7 @@ type SrcUser = {
   primary_extension: string | null;
 };
 
-type SrcVmBox = { alias: string; extension: string | null };
+type SrcVmBox = { alias: string; extension: string | null; greeting_key?: string | null };
 
 type SrcHuntPilot = {
   id: string;
@@ -228,9 +228,11 @@ export function buildPersonMapping(user: SrcUser, vmBoxes: SrcVmBox[]) {
     ext = fixed.extension;
   }
 
-  const hasVm = vmBoxes.some((b) => (ext && b.extension === ext) || b.alias.toLowerCase() === user.userid.toLowerCase());
+  const vmBox = vmBoxes.find((b) => (ext && b.extension === ext) || b.alias.toLowerCase() === user.userid.toLowerCase());
+  const hasVm = !!vmBox;
+  if (vmBox?.greeting_key) notes.push("Unity greeting matched — uploaded as the no-answer greeting after voicemail is enabled");
 
-  const payload: PersonPayload = {
+  const payload: PersonPayload & { greetingKey?: string | null } = {
     email,
     firstName: user.first_name,
     lastName: user.last_name,
@@ -239,6 +241,7 @@ export function buildPersonMapping(user: SrcUser, vmBoxes: SrcVmBox[]) {
     phoneNumber,
     locationName: null,
     voicemail: hasVm,
+    greetingKey: vmBox?.greeting_key ?? null,
   };
   return { payload, confidence, notes };
 }
@@ -541,7 +544,15 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
       .run();
   }
   const users = (await env.DB.prepare("SELECT * FROM src_users WHERE project_id = ?").bind(projectId).all<SrcUser>()).results;
-  const vmBoxes = (await env.DB.prepare("SELECT alias, extension FROM src_vm_boxes WHERE project_id = ?").bind(projectId).all<SrcVmBox>()).results;
+  const vmBoxes = (
+    await env.DB.prepare(
+      `SELECT b.alias, b.extension,
+         (SELECT g.r2_key FROM src_vm_greetings g WHERE g.project_id = b.project_id AND g.matched_alias = b.alias LIMIT 1) AS greeting_key
+       FROM src_vm_boxes b WHERE b.project_id = ?`,
+    )
+      .bind(projectId)
+      .all<SrcVmBox>()
+  ).results;
   const pilots = (await env.DB.prepare("SELECT * FROM src_hunt_pilots WHERE project_id = ?").bind(projectId).all<SrcHuntPilot>()).results;
   const pickups = (await env.DB.prepare("SELECT * FROM src_pickup_groups WHERE project_id = ?").bind(projectId).all<SrcPickup>()).results;
   const transPatterns = (await env.DB.prepare("SELECT * FROM src_trans_patterns WHERE project_id = ?").bind(projectId).all<SrcTransPattern>()).results;

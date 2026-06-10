@@ -109,6 +109,9 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
           worsen("amber");
           notes.push(`Extension ${payload.extension} appears to be in use`);
         }
+        if (payload.voicemail) {
+          notes.push(payload.greetingKey ? "Voicemail will be enabled with the matched Unity greeting" : "Voicemail will be enabled (no greeting file matched — default greeting)");
+        }
       } else if (item.target_type === "call_park") {
         checkLocation();
         if (!payload.extension) {

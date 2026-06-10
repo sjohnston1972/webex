@@ -277,13 +277,32 @@ export class WebexClient {
     return this.request("DELETE", `/telephony/config/callRouting/translationPatterns/${translationPatternId}`);
   }
 
-  setVoicemail(personId: string, enabled: boolean) {
+  setVoicemail(personId: string, enabled: boolean, customNoAnswerGreeting = false) {
     return this.request("PUT", `/people/${personId}/features/voicemail`, {
       enabled,
       sendBusyCalls: { enabled: true },
-      sendUnansweredCalls: { enabled: true, numberOfRings: 4 },
+      sendUnansweredCalls: { enabled: true, numberOfRings: 4, greeting: customNoAnswerGreeting ? "CUSTOM" : "DEFAULT" },
       messageStorage: { mwiEnabled: true, storageType: "INTERNAL" },
     });
+  }
+
+  /** Multipart upload (greeting WAVs). */
+  private async requestForm<T = any>(method: string, path: string, form: FormData): Promise<T> {
+    const res = await fetch(`${BASE}${path}`, {
+      method,
+      headers: { Authorization: `Bearer ${this.accessToken}` },
+      body: form,
+    });
+    if (res.status === 204) return undefined as T;
+    const text = await res.text();
+    if (!res.ok) throw new WebexError(`${method} ${path} → ${res.status}: ${text.slice(0, 300)}`, res.status);
+    return (text ? safeJson(text) : undefined) as T;
+  }
+
+  uploadVoicemailGreeting(personId: string, bytes: ArrayBuffer, filename: string) {
+    const form = new FormData();
+    form.set("file", new File([bytes], filename.replace(/[^\w.\-]+/g, "_"), { type: "audio/wav" }));
+    return this.requestForm("POST", `/people/${personId}/features/voicemail/actions/uploadNoAnswerGreeting/invoke`, form);
   }
 }
 

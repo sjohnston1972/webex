@@ -13,6 +13,7 @@ const SRC_TABLES = [
   "src_vm_boxes",
   "src_trans_patterns",
   "src_dialplan",
+  "src_vm_greetings",
 ];
 
 export const projects = new Hono<AppContext>();
