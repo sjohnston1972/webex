@@ -12,6 +12,8 @@ export const REQUESTED_SCOPES = [
   "spark-admin:telephony_config_write",
   "spark-admin:locations_read",
   "spark-admin:locations_write",
+  "spark-admin:workspaces_read",
+  "spark-admin:workspaces_write",
   "spark-admin:licenses_read",
   "spark:kms",
 ].join(" ");
@@ -205,6 +207,14 @@ export class WebexClient {
 
   deleteCallPickup(locationId: string, callPickupId: string) {
     return this.request("DELETE", `/telephony/config/locations/${locationId}/callPickups/${callPickupId}`);
+  }
+
+  createWorkspace(payload: Record<string, unknown>) {
+    return this.request("POST", "/workspaces", payload);
+  }
+
+  deleteWorkspace(workspaceId: string) {
+    return this.request("DELETE", `/workspaces/${workspaceId}`);
   }
 
   // --- PSTN / premises routing (dial plan migration) ---

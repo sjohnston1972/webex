@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildRoutePatternMapping, buildTranslationPatternMapping, mapHuntPolicy } from "../src/mapping/engine";
+import { buildHuntGroupMapping, buildPersonMapping, buildPickupMapping, buildRoutePatternMapping, buildTranslationPatternMapping, buildWorkspaceMapping, mapHuntPolicy, sanitizeExtension, sanitizePattern } from "../src/mapping/engine";
 
 const user = (over: Partial<Record<string, string | null>> = {}) => ({
   id: "u1",
@@ -109,19 +109,78 @@ describe("buildTranslationPatternMapping", () => {
   });
 });
 
+describe("sanitizePattern / sanitizeExtension", () => {
+  it("removes dots, slashes, backslashes and whitespace", () => {
+    const r = sanitizePattern("9.1\\23/4 5XX");
+    expect(r.pattern).toBe("912345XX");
+    expect(r.removed).toEqual(expect.arrayContaining([".", "\\", "/", " "]));
+    expect(r.unsupported).toEqual([]);
+  });
+  it("reports characters Webex cannot express", () => {
+    expect(sanitizePattern("9.@").unsupported).toEqual(["@"]);
+    expect(sanitizePattern("8?X").unsupported).toEqual(["?"]);
+  });
+  it("keeps Webex-legal wildcard syntax", () => {
+    expect(sanitizePattern("+44[2-5]XX!").unsupported).toEqual([]);
+  });
+  it("corrects extensions to plain digits and flags non-numeric leftovers", () => {
+    expect(sanitizeExtension("20.01")).toMatchObject({ extension: "2001", valid: true });
+    expect(sanitizeExtension("20X1").valid).toBe(false);
+  });
+});
+
 describe("buildRoutePatternMapping", () => {
   it("strips the CUCM pre-dot and flags for review", () => {
     const { payload, confidence, notes } = buildRoutePatternMapping({ id: "r1", name: "9.XXXXXXXXXX", partition_name: "PT-PSTN", description: "Local calls" });
     expect(payload.dialPattern).toBe("9XXXXXXXXXX");
     expect(payload.cucmPattern).toBe("9.XXXXXXXXXX");
     expect(confidence).toBe("amber");
-    expect(notes.join(" ")).toMatch(/pre-dot stripped/i);
+    expect(notes.join(" ")).toMatch(/pattern corrected/i);
     expect(payload.routeChoice).toBeNull();
   });
 
   it("goes red on characters Webex cannot express", () => {
     const { confidence } = buildRoutePatternMapping({ id: "r2", name: "9.@", partition_name: null, description: null });
     expect(confidence).toBe("red");
+  });
+});
+
+describe("buildWorkspaceMapping", () => {
+  const phone = (over: Partial<Record<string, string | null>> = {}) => ({
+    id: "ph1",
+    device_name: "SEP001122334455",
+    description: "Lobby Phone",
+    model: "Cisco 8845",
+    owner_userid: null,
+    device_pool: "dCloud_DP",
+    location_name: null,
+    lines_json: '["7200"]',
+    ...over,
+  });
+
+  it("maps an owner-less phone with one line to a workspace", () => {
+    const { payload, confidence } = buildWorkspaceMapping(phone());
+    expect(payload.name).toBe("Lobby Phone");
+    expect(payload.extension).toBe("7200");
+    expect(confidence).toBe("green");
+  });
+
+  it("flags extra lines as not migrated", () => {
+    const { confidence, notes } = buildWorkspaceMapping(phone({ lines_json: '["7200","7201"]' }));
+    expect(confidence).toBe("amber");
+    expect(notes.join(" ")).toMatch(/only the first/i);
+  });
+
+  it("corrects separators in the line number", () => {
+    const { payload, notes } = buildWorkspaceMapping(phone({ lines_json: '["72.00"]' }));
+    expect(payload.extension).toBe("7200");
+    expect(notes.join(" ")).toMatch(/corrected/i);
+  });
+
+  it("treats an E.164 line as the workspace number", () => {
+    const { payload } = buildWorkspaceMapping(phone({ lines_json: '["+442071234567"]' }));
+    expect(payload.phoneNumber).toBe("+442071234567");
+    expect(payload.extension).toBeNull();
   });
 });
 

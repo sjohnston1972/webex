@@ -1,6 +1,27 @@
 import type { Env } from "../env";
 import { batchAll, uuid } from "../lib/util";
 
+/**
+ * Error-correct a CUCM pattern into Webex-acceptable syntax.
+ * Separator/formatting characters (".", "\", "/", spaces, quotes) are
+ * removed; anything left that Webex cannot express is reported so the
+ * mapping can be flagged instead of silently pushed wrong.
+ */
+export function sanitizePattern(raw: string): { pattern: string; removed: string[]; unsupported: string[] } {
+  const removed = [...new Set(raw.match(/[.\\/\s"']/g) ?? [])];
+  const pattern = raw.replace(/[.\\/\s"']/g, "");
+  // Webex dial patterns allow: digits, X wildcards, [] ranges with -, !, *, #, +
+  const unsupported = [...new Set(pattern.match(/[^0-9Xx*#!+\[\]\-]/g) ?? [])];
+  return { pattern, removed, unsupported };
+}
+
+/** Extensions must end up as plain digits; separators are corrected away. */
+export function sanitizeExtension(raw: string): { extension: string; removed: string[]; valid: boolean } {
+  const removed = [...new Set(raw.match(/[.\\/\s"'-]/g) ?? [])];
+  const extension = raw.replace(/[.\\/\s"'-]/g, "");
+  return { extension, removed, valid: /^\d+$/.test(extension) };
+}
+
 // CUCM line-group algorithm → Webex hunt group policy
 export function mapHuntPolicy(cucmAlgorithm: string | null): { policy: string; note?: string } {
   switch ((cucmAlgorithm ?? "").trim().toLowerCase()) {
@@ -70,9 +91,18 @@ export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensi
   const mask = tp.called_party_mask?.trim() || null;
   const prefix = tp.prefix_digits?.trim() || null;
 
+  const matching = sanitizePattern(tp.pattern);
+  if (matching.removed.length > 0) notes.push(`Matching pattern corrected: "${tp.pattern}" → "${matching.pattern}"`);
+  if (matching.unsupported.length > 0) {
+    confidence = "red";
+    notes.push(`Matching pattern uses CUCM syntax Webex cannot express: ${matching.unsupported.join(" ")}`);
+  }
+
   let replacementPattern: string | null = null;
   if (mask) {
-    replacementPattern = mask;
+    const fixedMask = sanitizePattern(mask);
+    replacementPattern = fixedMask.pattern;
+    if (fixedMask.removed.length > 0) notes.push(`Replacement corrected: "${mask}" → "${fixedMask.pattern}"`);
     notes.push("Derived from CUCM called-party transformation mask — verify wildcard semantics match Webex replacement syntax");
     if (knownExtensions.has(mask)) {
       notes.push(`Mask resolves to internal extension ${mask} — if this is a DID alias, assigning the number to the person in Webex may replace this pattern entirely`);
@@ -87,7 +117,8 @@ export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensi
 
   const payload = {
     name: tp.description?.trim() || `TP ${tp.pattern}`,
-    matchingPattern: tp.pattern,
+    matchingPattern: matching.pattern,
+    cucmPattern: tp.pattern,
     replacementPattern,
     cucmPartition: tp.partition_name,
     cucmPrefixDigits: prefix,
@@ -108,12 +139,21 @@ export function buildPersonMapping(user: SrcUser, vmBoxes: SrcVmBox[]) {
     notes.push(`"${email}" does not look like a valid email`);
   }
 
-  const ext = user.primary_extension?.trim() || null;
+  let ext = user.primary_extension?.trim() || null;
   if (!ext) {
     if (confidence === "green") confidence = "amber";
     notes.push("No primary extension — person will be created without a number");
   }
   const phoneNumber = ext && /^\+\d{7,15}$/.test(ext) ? ext : null;
+  if (ext && !phoneNumber) {
+    const fixed = sanitizeExtension(ext);
+    if (fixed.removed.length > 0) notes.push(`Extension corrected: "${ext}" → "${fixed.extension}" (removed ${fixed.removed.join(" ")})`);
+    if (!fixed.valid) {
+      confidence = "red";
+      notes.push(`Extension "${fixed.extension}" is not a plain number — fix before pushing`);
+    }
+    ext = fixed.extension;
+  }
 
   const hasVm = vmBoxes.some((b) => (ext && b.extension === ext) || b.alias.toLowerCase() === user.userid.toLowerCase());
 
@@ -170,9 +210,16 @@ export function buildHuntGroupMapping(
     notes.push("No members found for this hunt pilot");
   }
 
+  const fixed = sanitizeExtension(pilot.pattern);
+  if (fixed.removed.length > 0) notes.push(`Hunt number corrected: "${pilot.pattern}" → "${fixed.extension}"`);
+  if (!fixed.valid) {
+    confidence = "red";
+    notes.push(`Hunt pilot "${pilot.pattern}" contains wildcards/pattern syntax — a Webex hunt group needs a literal number`);
+  }
+
   const payload = {
     name: pilot.description?.trim() || `Hunt ${pilot.pattern}`,
-    extension: pilot.pattern,
+    extension: fixed.extension,
     policy,
     agentEmails,
     unresolvedMembers: unresolved,
@@ -227,14 +274,15 @@ export function buildRoutePatternMapping(rp: SrcRoutePattern) {
   const notes: string[] = [];
   let confidence: "green" | "amber" | "red" = "amber";
 
-  const dialPattern = rp.name.replace(/\./g, "");
+  const fixed = sanitizePattern(rp.name);
+  const dialPattern = fixed.pattern;
   notes.push("Choose a route target (trunk or route group) — pushed as a dial pattern in a Webex dial plan (premises PSTN)");
-  if (/[^0-9Xx*#!+\[\]\-]/.test(dialPattern)) {
+  if (fixed.unsupported.length > 0) {
     confidence = "red";
-    notes.push(`Pattern contains characters with no Webex dial-pattern equivalent: review "${rp.name}"`);
+    notes.push(`Pattern contains characters with no Webex dial-pattern equivalent (${fixed.unsupported.join(" ")}): review "${rp.name}"`);
   }
-  if (rp.name.includes(".")) {
-    notes.push(`CUCM pre-dot stripped (${rp.name} → ${dialPattern}) — confirm digit handling; Webex does not strip access codes`);
+  if (fixed.removed.length > 0) {
+    notes.push(`Pattern corrected (${rp.name} → ${dialPattern}, removed ${fixed.removed.join(" ")}) — confirm digit handling; Webex does not strip access codes`);
   }
 
   const payload = {
@@ -245,6 +293,99 @@ export function buildRoutePatternMapping(rp: SrcRoutePattern) {
     routeChoice: null as { type: string; id: string; name: string } | null,
   };
   return { payload, confidence, notes };
+}
+
+type SrcPhone = {
+  id: string;
+  device_name: string;
+  description: string | null;
+  model: string | null;
+  owner_userid: string | null;
+  device_pool: string | null;
+  location_name: string | null;
+  lines_json: string | null;
+};
+
+/**
+ * Owner-less phone (common area) → Webex Workspace with calling.
+ * First line becomes the workspace number; extra lines are flagged.
+ */
+export function buildWorkspaceMapping(phone: SrcPhone) {
+  const notes: string[] = [];
+  let confidence: "green" | "amber" | "red" = "green";
+
+  let lines: string[] = [];
+  try {
+    lines = JSON.parse(phone.lines_json ?? "[]");
+  } catch {
+    /* written by our own ingest */
+  }
+
+  let extension: string | null = null;
+  let phoneNumber: string | null = null;
+  if (lines.length === 0) {
+    confidence = "amber";
+    notes.push("Phone has no lines — workspace will be created without a number");
+  } else {
+    const first = lines[0];
+    if (/^\+\d{7,15}$/.test(first)) {
+      phoneNumber = first;
+    } else {
+      const fixed = sanitizeExtension(first);
+      if (fixed.removed.length > 0) notes.push(`Line corrected: "${first}" → "${fixed.extension}"`);
+      if (!fixed.valid) {
+        confidence = "red";
+        notes.push(`Line "${first}" is not a plain number — fix before pushing`);
+      }
+      extension = fixed.extension;
+    }
+    if (lines.length > 1) {
+      confidence = "amber";
+      notes.push(`Phone has ${lines.length} lines — only the first (${lines[0]}) migrates; others: ${lines.slice(1).join(", ")}`);
+    }
+  }
+
+  const payload = {
+    name: phone.description?.trim() || phone.device_name,
+    deviceName: phone.device_name,
+    deviceModel: phone.model,
+    extension,
+    phoneNumber,
+    locationName: null as string | null,
+    cucmSite: null as string | null,
+  };
+  return { payload, confidence, notes };
+}
+
+/**
+ * Directory numbers with no migration path: not a person's number, not a
+ * workspace's number, not a hunt group number. Used by the summary tile and
+ * the readiness report so nothing is silently dropped.
+ */
+export async function listUnattachedDns(env: Env, projectId: string): Promise<string[]> {
+  const lines = (
+    await env.DB.prepare("SELECT pattern FROM src_lines WHERE project_id = ?").bind(projectId).all<{ pattern: string }>()
+  ).results;
+  const payloads = (
+    await env.DB.prepare(
+      "SELECT target_payload FROM mappings WHERE project_id = ? AND target_type IN ('person','workspace','hunt_group')",
+    )
+      .bind(projectId)
+      .all<{ target_payload: string }>()
+  ).results;
+  const covered = new Set<string>();
+  for (const row of payloads) {
+    try {
+      const p = JSON.parse(row.target_payload);
+      if (p.extension) covered.add(String(p.extension));
+      if (p.phoneNumber) covered.add(String(p.phoneNumber));
+    } catch {
+      /* our own JSON */
+    }
+  }
+  return lines
+    .map((l) => l.pattern)
+    .filter((pattern) => !covered.has(pattern) && !covered.has(sanitizeExtension(pattern).extension));
 }
 
 /** Most common non-null value, or null. */
@@ -266,6 +407,7 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     ["pickup_group", "src_pickup_groups"],
     ["trans_pattern", "src_trans_patterns"],
     ["route_pattern", "src_dialplan"],
+    ["phone", "src_phones"],
   ];
   for (const [srcType, table] of orphanCleanup) {
     await env.DB.prepare(
@@ -289,9 +431,11 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   // of their owned phone; the human-confirmed site → Webex location mapping
   // lives in site_mappings.
   const phones = (
-    await env.DB.prepare("SELECT owner_userid, device_pool, location_name FROM src_phones WHERE project_id = ?")
+    await env.DB.prepare(
+      "SELECT id, device_name, description, model, owner_userid, device_pool, location_name, lines_json FROM src_phones WHERE project_id = ?",
+    )
       .bind(projectId)
-      .all<{ owner_userid: string | null; device_pool: string | null; location_name: string | null }>()
+      .all<SrcPhone>()
   ).results;
   const siteByUser = new Map<string, string>();
   for (const p of phones) {
@@ -381,6 +525,20 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   for (const rp of routePatterns) {
     const { payload, confidence, notes } = buildRoutePatternMapping(rp);
     upsert("route_pattern", rp.id, "route_pattern", payload, confidence, notes);
+  }
+  // Owner-less phones with at least one line become workspaces (common area).
+  for (const phone of phones) {
+    if (phone.owner_userid) continue;
+    let hasLines = false;
+    try {
+      hasLines = JSON.parse(phone.lines_json ?? "[]").length > 0;
+    } catch {
+      /* our own ingest */
+    }
+    if (!hasLines) continue;
+    const { payload, confidence, notes } = buildWorkspaceMapping(phone);
+    const site = phone.device_pool || phone.location_name;
+    upsert("phone", phone.id, "workspace", { ...payload, cucmSite: site, locationName: locationFor(site) }, confidence, notes);
   }
 
   await batchAll(env.DB, stmts);

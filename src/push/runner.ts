@@ -54,8 +54,8 @@ export async function startPush(env: Env, projectId: string, batchId: string): P
       .all<{ id: string; target_type: string }>()
   ).results;
 
-  // Create job rows for everything; queue only people now (groups wait for people).
-  const people = items.filter((i) => i.target_type === "person");
+  // Create job rows for everything; queue people + workspaces now (groups wait for people).
+  const people = items.filter((i) => i.target_type === "person" || i.target_type === "workspace");
   const groups = items.filter((i) => GROUP_TYPES.includes(i.target_type));
   let queued = 0;
 
@@ -162,13 +162,13 @@ export async function processJob(env: Env, jobId: string): Promise<void> {
     await finalizeBatchIfComplete(env, item.batch_id);
   }
 
-  // If this was the last person push in the batch, release the waiting group jobs.
-  if (job.action === "push" && item.target_type === "person") {
+  // If this was the last person/workspace push in the batch, release the waiting group jobs.
+  if (job.action === "push" && (item.target_type === "person" || item.target_type === "workspace")) {
     const remaining = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM push_jobs pj
        JOIN batch_items bi ON bi.id = pj.batch_item_id
        JOIN mappings m ON m.id = bi.mapping_id
-       WHERE pj.batch_id = ? AND pj.action = 'push' AND m.target_type = 'person' AND pj.status IN ('pending','running')`,
+       WHERE pj.batch_id = ? AND pj.action = 'push' AND m.target_type IN ('person','workspace') AND pj.status IN ('pending','running')`,
     )
       .bind(item.batch_id)
       .first<{ n: number }>();
@@ -225,6 +225,20 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
         await appendError(env, item.id, `Person created, but enabling voicemail failed: ${e instanceof Error ? e.message : e}`);
       }
     }
+  } else if (item.target_type === "workspace") {
+    const loc = await resolveLocation();
+    const calling: Record<string, unknown> = { locationId: loc.id };
+    if (payload.extension) calling.extension = payload.extension;
+    if (payload.phoneNumber) calling.phoneNumber = payload.phoneNumber;
+    const body = {
+      displayName: payload.name,
+      locationId: loc.id,
+      type: "other",
+      calling: { type: "webexCalling", webexCalling: calling },
+      notes: payload.deviceName ? `Migrated from CUCM device ${payload.deviceName}` : undefined,
+    };
+    const ws = (await client.createWorkspace(body)) as any;
+    await recordSuccess(env, item.id, ws.id, { created: true, type: "workspace" });
   } else if (item.target_type === "hunt_group") {
     const loc = await resolveLocation();
     const agents: { id: string }[] = [];
@@ -291,6 +305,7 @@ async function rollbackItem(env: Env, item: ItemRow): Promise<void> {
   const client = await WebexClient.forProject(env, item.project_id);
   try {
     if (info.type === "person") await client.deletePerson(item.webex_resource_id);
+    else if (info.type === "workspace") await client.deleteWorkspace(item.webex_resource_id);
     else if (info.type === "hunt_group") await client.deleteHuntGroup(info.locationId, item.webex_resource_id);
     else if (info.type === "call_pickup") await client.deleteCallPickup(info.locationId, item.webex_resource_id);
     else if (info.type === "translation_pattern") await client.deleteTranslationPattern(item.webex_resource_id);

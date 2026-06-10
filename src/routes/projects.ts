@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
 import { uuid } from "../lib/util";
+import { listUnattachedDns } from "../mapping/engine";
 
 const SRC_TABLES = [
   "src_users",
@@ -91,6 +92,7 @@ projects.get("/:id/summary", async (c) => {
     counts,
     mappings: mappings.results,
     mappingsByType: mappingsByType.results,
+    unattachedDns: (await listUnattachedDns(c.env, id)).length,
     batches: batches.results,
     snapshots: snapshots.results,
     axl: axl ?? null,

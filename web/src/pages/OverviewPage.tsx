@@ -22,6 +22,7 @@ const ELIGIBLE_LABELS: Record<string, string> = {
   call_pickup: "Call pickup",
   translation_pattern: "Translation patterns",
   route_pattern: "Route patterns",
+  workspace: "Workspaces (common area)",
 };
 
 export function OverviewPage() {
@@ -72,6 +73,12 @@ export function OverviewPage() {
                 <div className="tile-label">{ELIGIBLE_LABELS[m.target_type] ?? m.target_type} · {m.selected ?? 0} selected</div>
               </div>
             ))}
+            {(summary.unattachedDns ?? 0) > 0 && (
+              <div className="tile" style={{ boxShadow: "0 1px 2px rgba(32,41,47,0.05), 0 0 0 1px #ecc7c5" }}>
+                <div className="tile-value" style={{ color: "var(--red)" }}>{summary.unattachedDns}</div>
+                <div className="tile-label">Unattached DNs · no migration path</div>
+              </div>
+            )}
           </div>
         </>
       )}

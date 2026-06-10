@@ -10,6 +10,7 @@ const TYPE_LABELS: Record<string, string> = {
   call_pickup: "Call pickup groups",
   translation_pattern: "Translation patterns (deselected by default — review digit manipulation)",
   route_pattern: "Route patterns (→ Webex dial plans, premises PSTN)",
+  workspace: "Workspaces (owner-less / common-area phones)",
 };
 
 type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
@@ -227,6 +228,7 @@ export function ReviewPage() {
                             {type === "call_pickup" && <div className="dim small">{p.agentEmails?.length ?? 0} members</div>}
                             {type === "translation_pattern" && <div className="dim small mono">{p.matchingPattern} → {p.replacementPattern ?? "?"}</div>}
                             {type === "route_pattern" && <div className="dim small mono">{p.cucmPattern} → {p.dialPattern}</div>}
+                            {type === "workspace" && <div className="dim small">{p.deviceModel ?? "phone"} · {p.deviceName}</div>}
                           </>
                         )}
                       </td>

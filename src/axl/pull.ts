@@ -69,14 +69,33 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
     );
     counts.users = users.length;
 
-    // Phones
+    // Phones — with their lines (devicenumplanmap), needed to migrate
+    // owner-less phones as Webex workspaces.
     const phones = await axl.listPhones();
+    const linesByDevice = new Map<string, string[]>();
+    try {
+      const rows = await axl.sql(
+        `select d.name as device, n.dnorpattern as dn, dnpm.numplanindex as idx
+         from device d
+         join devicenumplanmap dnpm on dnpm.fkdevice = d.pkid
+         join numplan n on n.pkid = dnpm.fknumplan
+         where d.tkclass = 1
+         order by d.name, dnpm.numplanindex`,
+      );
+      for (const r of rows) {
+        const device = text(r.device);
+        if (!linesByDevice.has(device)) linesByDevice.set(device, []);
+        linesByDevice.get(device)!.push(text(r.dn));
+      }
+    } catch (e) {
+      warnings.push(`Phone line associations unavailable: ${e instanceof Error ? e.message : e}`);
+    }
     await batchAll(
       env.DB,
       phones.map((p) =>
         env.DB.prepare(
-          `INSERT INTO src_phones (id, project_id, snapshot_id, device_name, description, model, owner_userid, device_pool, location_name, raw_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO src_phones (id, project_id, snapshot_id, device_name, description, model, owner_userid, device_pool, location_name, lines_json, raw_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).bind(
           uuid(),
           projectId,
@@ -87,6 +106,7 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
           text(p.ownerUserName) || null,
           text(p.devicePoolName) || null,
           text(p.locationName) || null,
+          JSON.stringify(linesByDevice.get(text(p.name)) ?? []),
           JSON.stringify(p),
         ),
       ),

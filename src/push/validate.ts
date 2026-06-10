@@ -109,6 +109,29 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
           worsen("amber");
           notes.push(`Extension ${payload.extension} appears to be in use`);
         }
+      } else if (item.target_type === "workspace") {
+        checkLocation();
+        const wsLicense = licenses.find(
+          (l: any) => /webex calling.*workspaces/i.test(l.name) && (l.totalUnits === undefined || l.consumedUnits < l.totalUnits),
+        );
+        if (!wsLicense) {
+          worsen("amber");
+          notes.push("No 'Webex Calling - Workspaces' licence with free units found — workspace calling may fail to provision");
+        }
+        if (payload.extension && extensionsInUse.has(String(payload.extension))) {
+          worsen("amber");
+          notes.push(`Extension ${payload.extension} appears to be in use`);
+        }
+        if (payload.phoneNumber) {
+          const num = numberByE164.get(payload.phoneNumber);
+          if (!num) {
+            worsen("red");
+            notes.push(`Number ${payload.phoneNumber} is not in the Webex number inventory`);
+          } else if (num.owner) {
+            worsen("red");
+            notes.push(`Number ${payload.phoneNumber} is already assigned`);
+          }
+        }
       } else if (item.target_type === "translation_pattern") {
         if (!payload.replacementPattern) {
           worsen("red");

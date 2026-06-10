@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
 import { toCsv } from "../lib/util";
+import { listUnattachedDns } from "../mapping/engine";
 
 export const reports = new Hono<AppContext>();
 
@@ -26,6 +27,10 @@ reports.get("/:id/reports/readiness.csv", async (c) => {
     const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
     return [r.target_type, label, p.extension ?? p.phoneNumber ?? "", p.locationName ?? "", r.confidence, r.selected ? "yes" : "no", r.status, r.notes ?? ""];
   });
+  // Nothing silently dropped: DNs with no migration path get their own rows.
+  for (const dn of await listUnattachedDns(c.env, c.req.param("id"))) {
+    rows.push(["directory_number (unattached)", dn, dn, "", "red", "no", "none", "No migration path: not a person, workspace or hunt group number"]);
+  }
   return csvResponse(
     "readiness-report.csv",
     toCsv(["Object type", "Identity", "Number/Extension", "Webex location", "Readiness", "Selected", "Mapping status", "Issues"], rows),

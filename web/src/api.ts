@@ -56,6 +56,7 @@ export type Summary = {
   counts: Record<string, number>;
   mappings: { confidence: string; n: number; selected: number }[];
   mappingsByType: { target_type: string; n: number; selected: number }[];
+  unattachedDns: number;
   batches: { id: string; name: string; status: string; created_at: string }[];
   snapshots: {
     id: string;
