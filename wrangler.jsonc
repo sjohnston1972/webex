@@ -33,7 +33,7 @@
       {
         "queue": "webex-push",
         "max_batch_size": 1,
-        "max_concurrency": 1,
+        "max_concurrency": 6,
         "max_retries": 3
       }
     ]
