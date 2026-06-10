@@ -450,6 +450,7 @@ td.notes { color: var(--ink-soft); font-size: 12px; max-width: 360px; }
   overflow: hidden;
 }
 .modal-wide { width: 640px; }
+.modal-xl { width: 800px; }
 .modal .card-body { padding: 20px; }
 @keyframes fade { from { opacity: 0; } }
 

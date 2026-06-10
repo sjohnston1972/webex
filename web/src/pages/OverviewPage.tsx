@@ -98,7 +98,7 @@ function TileModal({ projectId, spec, onClose }: { projectId: string; spec: Tile
   }, [projectId, spec]);
 
   return (
-    <Modal title={spec.title} onClose={onClose} wide>
+    <Modal title={spec.title} onClose={onClose} xl>
       {error && <div className="alert error">{error}</div>}
       {!rows && !error ? (
         <Spinner />
