@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { nowIso, uuid } from "../lib/util";
-import { pickCallingLicense, WebexClient } from "../webex/client";
+import { pickCallingLicense, WebexClient, WebexError } from "../webex/client";
 
 // Push order: people first; hunt groups / pickup groups only after every
 // person job in the batch has finished (members must exist). Rollback runs
@@ -192,7 +192,8 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
   const resolveLocation = async (): Promise<any> => {
     const locations = await client.listLocations();
     const loc = locations.find((l: any) => String(l.name).toLowerCase() === String(payload.locationName ?? "").toLowerCase());
-    if (!loc) throw new Error(`Location "${payload.locationName}" not found in Control Hub`);
+    // 422: permanent — retrying cannot conjure a missing location.
+    if (!loc) throw new WebexError(`Location "${payload.locationName}" not found in Control Hub`, 422);
     return loc;
   };
 
@@ -209,7 +210,8 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     const loc = await resolveLocation();
     const licenses = await client.listLicenses();
     const calling = pickCallingLicense(licenses);
-    if (!calling) throw new Error("No Webex Calling licence with available units");
+    // 422: permanent — seats don't free themselves mid-run.
+    if (!calling) throw new WebexError("No Webex Calling licence with available units — org seat capacity exhausted", 422);
 
     const body: Record<string, unknown> = {
       emails: [payload.email],
