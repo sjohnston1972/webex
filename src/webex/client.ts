@@ -269,6 +269,11 @@ export class WebexClient {
     return this.request("POST", "/telephony/config/locations", location);
   }
 
+  async listTranslationPatterns(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/callRouting/translationPatterns", undefined, { max: "2000" });
+    return r.translationPatterns ?? r.items ?? [];
+  }
+
   createTranslationPattern(payload: Record<string, unknown>) {
     return this.request("POST", "/telephony/config/callRouting/translationPatterns", payload);
   }

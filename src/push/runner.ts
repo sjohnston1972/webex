@@ -207,26 +207,34 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
       }
       return;
     }
-    const loc = await resolveLocation();
-    const licenses = await client.listLicenses();
-    const calling = pickCallingLicense(licenses);
-    // 422: permanent — seats don't free themselves mid-run.
-    if (!calling) throw new WebexError("No Webex Calling licence with available units — org seat capacity exhausted", 422);
-
     const body: Record<string, unknown> = {
       emails: [payload.email],
       firstName: payload.firstName ?? undefined,
       lastName: payload.lastName ?? undefined,
       displayName: payload.displayName ?? undefined,
-      locationId: loc.id,
-      licenses: [calling.id],
     };
-    if (payload.extension) body.extension = payload.extension;
-    if (payload.phoneNumber) body.phoneNumbers = [{ type: "work", value: payload.phoneNumber }];
+    // Webex rejects a calling user with no number — create numberless people
+    // as plain persons (no calling licence) instead of failing.
+    const numberless = !payload.extension && !payload.phoneNumber;
+    if (!numberless) {
+      const loc = await resolveLocation();
+      const licenses = await client.listLicenses();
+      const calling = pickCallingLicense(licenses);
+      // 422: permanent — seats don't free themselves mid-run.
+      if (!calling) throw new WebexError("No Webex Calling licence with available units — org seat capacity exhausted", 422);
+      body.locationId = loc.id;
+      body.licenses = [calling.id];
+      if (payload.extension) body.extension = payload.extension;
+      if (payload.phoneNumber) body.phoneNumbers = [{ type: "work", value: payload.phoneNumber }];
+    }
 
     const person = (await client.createPerson(body)) as any;
     await recordSuccess(env, item.id, person.id, { created: true, type: "person" });
-    await applyVoicemail(env, client, item.id, person.id, payload);
+    if (numberless) {
+      await appendError(env, item.id, "Created without Webex Calling (no number available) — assign a licence and number manually if needed");
+    } else {
+      await applyVoicemail(env, client, item.id, person.id, payload);
+    }
   } else if (item.target_type === "workspace") {
     const loc = await resolveLocation();
     const calling: Record<string, unknown> = { locationId: loc.id };
@@ -262,16 +270,42 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     if (missing.length > 0) await appendError(env, item.id, `Created without unresolvable members: ${missing.join(", ")}`);
   } else if (item.target_type === "call_pickup") {
     const loc = await resolveLocation();
-    const agents: string[] = [];
+    let agents: string[] = [];
     const missing: string[] = [];
     for (const email of payload.agentEmails ?? []) {
       const person = await client.findPersonByEmail(email);
       if (person) agents.push(person.id);
       else missing.push(email);
     }
-    const result = (await client.createCallPickup(loc.id, { name: payload.name, agents })) as any;
+    // Webex rejects members without calling ("Error 4470: user not available
+    // for assignment") — drop the offender and retry rather than fail the group.
+    const dropped: string[] = [];
+    let result: any = null;
+    for (let attempt = 0; attempt <= (payload.agentEmails?.length ?? 0); attempt++) {
+      try {
+        result = (await client.createCallPickup(loc.id, { name: payload.name, agents })) as any;
+        break;
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        const match = /not available for assignment:\s*([0-9a-f-]{36})/i.exec(message);
+        if (!match) throw e;
+        const uuid = match[1];
+        const offender = agents.find((id) => {
+          try {
+            return atob(id).includes(uuid);
+          } catch {
+            return false;
+          }
+        });
+        if (!offender) throw e;
+        agents = agents.filter((id) => id !== offender);
+        dropped.push(uuid);
+      }
+    }
+    if (!result) throw new Error("Call pickup creation failed after removing unassignable members");
     await recordSuccess(env, item.id, result.id, { created: true, type: "call_pickup", locationId: loc.id });
     if (missing.length > 0) await appendError(env, item.id, `Created without unresolvable members: ${missing.join(", ")}`);
+    if (dropped.length > 0) await appendError(env, item.id, `Created without ${dropped.length} member(s) not assignable to pickup (no calling licence): ${dropped.join(", ")}`);
   } else if (item.target_type === "call_park") {
     if (!payload.extension) throw new Error("Call park range/pattern cannot push — edit the mapping to a single extension first");
     const loc = await resolveLocation();
@@ -279,8 +313,17 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     await recordSuccess(env, item.id, result.id, { created: true, type: "call_park", locationId: loc.id });
   } else if (item.target_type === "translation_pattern") {
     if (!payload.replacementPattern) throw new Error("No replacement pattern derived — review and edit this mapping before pushing");
+    // Idempotent: a pattern matching the same digits may already exist (e.g. a
+    // previous attempt, or CUCM descriptions colliding on name).
+    const existing = (await client.listTranslationPatterns()).find((t: any) => t.matchingPattern === payload.matchingPattern);
+    if (existing) {
+      await recordSuccess(env, item.id, existing.id, { created: false, type: "translation_pattern", note: "already existed" });
+      return;
+    }
+    // CUCM descriptions are not unique — suffix with the pattern.
+    const name = `${String(payload.name).replace(/[^a-zA-Z0-9_ -]/g, "_")} ${payload.matchingPattern}`.slice(0, 30).trim();
     const result = (await client.createTranslationPattern({
-      name: String(payload.name).slice(0, 30).replace(/[^a-zA-Z0-9_ -]/g, "_"),
+      name,
       matchingPattern: payload.matchingPattern,
       replacementPattern: payload.replacementPattern,
     })) as any;

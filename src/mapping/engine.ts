@@ -635,8 +635,24 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   // The site of a group is the most common site among its resolved members.
   const memberSites = (dns: string[]) => mostCommon(dns.map((dn) => siteOf(usersByExtension.get(dn)?.userid)));
 
+  // Shared lines: when several users carry the same primary extension, only
+  // the first can own the number in Webex — the rest are created numberless.
+  const claimedExtensions = new Set<string>();
   for (const user of users) {
-    const { payload, confidence, notes } = buildPersonMapping(user, vmBoxes);
+    const built = buildPersonMapping(user, vmBoxes);
+    let { confidence } = built;
+    const { payload, notes } = built;
+    const number = payload.phoneNumber ?? payload.extension;
+    if (number) {
+      if (claimedExtensions.has(String(number))) {
+        notes.push(`Shared line: ${number} is already assigned to another migrating user — this person will be created without a number (assign manually)`);
+        payload.extension = null;
+        payload.phoneNumber = null;
+        if (confidence === "green") confidence = "amber";
+      } else {
+        claimedExtensions.add(String(number));
+      }
+    }
     const site = siteOf(user.userid);
     upsert("user", user.id, "person", { ...payload, cucmSite: site, locationName: locationFor(site) }, confidence, notes);
   }
