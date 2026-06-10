@@ -9,3 +9,4 @@ pilot-batch-id.txt
 enc-token.txt
 wx-token.txt
 ws-session.xml
+migration-result.json
