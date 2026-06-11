@@ -84,7 +84,9 @@ ${mapping.notes ?? "(none)"}`;
   }
   const facts = `Project facts:
 - Org locations: ${locationNames.length ? locationNames.join(", ") : "(Webex not connected)"}
-- Mappings: ${stats?.total_mappings ?? 0} total, ${stats?.selected_count ?? 0} selected, ${stats?.unset_locations ?? 0} without a location`;
+- Mappings: ${stats?.total_mappings ?? 0} total, ${stats?.selected_count ?? 0} selected, ${stats?.unset_locations ?? 0} without a location
+
+${await buildMappingDigest(c.env, projectId)}`;
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -126,6 +128,38 @@ ${mapping.notes ?? "(none)"}`;
   }
   return c.json({ error: `AI request failed: ${lastError}` }, 502);
 });
+
+/** Compact roster of problem items so the model can answer "which one is blocked?". */
+async function buildMappingDigest(env: Env, projectId: string): Promise<string> {
+  const rows = (
+    await env.DB.prepare(
+      `SELECT target_type, target_payload, confidence, notes FROM mappings
+       WHERE project_id = ? AND confidence IN ('red','amber')
+       ORDER BY CASE confidence WHEN 'red' THEN 0 ELSE 1 END
+       LIMIT 60`,
+    )
+      .bind(projectId)
+      .all<{ target_type: string; target_payload: string; confidence: string; notes: string | null }>()
+  ).results;
+  if (rows.length === 0) return "No blocked or review-state mappings.";
+
+  const identity = (type: string, p: any): string => {
+    if (type === "person") return p.email ?? p.displayName ?? "(unnamed person)";
+    return p.name ?? p.matchingPattern ?? p.cucmPattern ?? "(unnamed)";
+  };
+  const line = (r: (typeof rows)[number]): string => {
+    const p = JSON.parse(r.target_payload);
+    const num = p.phoneNumber ?? p.extension ?? p.dialPattern ?? "";
+    const note = (r.notes ?? "").split("\n")[0]?.slice(0, 160) ?? "";
+    return `- [${r.target_type}] ${identity(r.target_type, p)}${num ? ` (${num})` : ""} — ${note || "no notes"}`;
+  };
+  const red = rows.filter((r) => r.confidence === "red");
+  const amber = rows.filter((r) => r.confidence === "amber").slice(0, 25);
+  const parts: string[] = [];
+  if (red.length) parts.push(`Blocked items (${red.length}):\n${red.map(line).join("\n")}`);
+  if (amber.length) parts.push(`Review-state items (showing ${amber.length}):\n${amber.map(line).join("\n")}`);
+  return parts.join("\n\n");
+}
 
 /** Parse a trailing ACTION line, validate against the allowlist, execute, summarise. */
 async function maybeExecuteAction(
