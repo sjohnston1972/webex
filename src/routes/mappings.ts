@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { generateMappings, recheckMapping } from "../mapping/engine";
+import { CALL_PERMISSION_LEVELS, generateMappings, recheckMapping } from "../mapping/engine";
 
 export const mappings = new Hono<AppContext>();
 
@@ -20,7 +20,7 @@ mappings.get("/:id/mappings", async (c) => {
 
 // Edit one mapping: selection, payload (merged), voicemail override, or any combination.
 mappings.patch("/:id/mappings/:mappingId", async (c) => {
-  const body = await c.req.json<{ selected?: boolean; payload?: Record<string, unknown>; voicemailOverride?: boolean }>();
+  const body = await c.req.json<{ selected?: boolean; payload?: Record<string, unknown>; voicemailOverride?: boolean; callPermission?: string }>();
   const row = await c.env.DB.prepare("SELECT * FROM mappings WHERE id = ? AND project_id = ?")
     .bind(c.req.param("mappingId"), c.req.param("id"))
     .first<{ target_payload: string; target_type: string }>();
@@ -37,6 +37,17 @@ mappings.patch("/:id/mappings/:mappingId", async (c) => {
   if (body.selected !== undefined) {
     await c.env.DB.prepare("UPDATE mappings SET selected = ? WHERE id = ?")
       .bind(body.selected ? 1 : 0, c.req.param("mappingId"))
+      .run();
+  }
+  // Call-permission class is a provisioning choice (persists across regeneration).
+  if (body.callPermission !== undefined) {
+    if (!CALL_PERMISSION_LEVELS.includes(body.callPermission as never)) {
+      return c.json({ error: `callPermission must be one of: ${CALL_PERMISSION_LEVELS.join(", ")}` }, 400);
+    }
+    await c.env.DB.prepare(
+      "UPDATE mappings SET call_permission = ?, target_payload = json_set(target_payload, '$.callPermission', ?) WHERE id = ?",
+    )
+      .bind(body.callPermission, body.callPermission, c.req.param("mappingId"))
       .run();
   }
   // Voicemail toggle is a provisioning choice, not an "edit": no status change,
@@ -94,12 +105,26 @@ mappings.put("/:id/site-mappings", async (c) => {
 mappings.post("/:id/mappings/bulk", async (c) => {
   const projectId = c.req.param("id");
   const body = await c.req.json<{
-    action: "select" | "deselect" | "setLocation" | "setRouteChoice" | "setVoicemail";
+    action: "select" | "deselect" | "setLocation" | "setRouteChoice" | "setVoicemail" | "setCallPermission";
     targetType?: string;
     locationName?: string;
     routeChoice?: { type: string; id: string; name: string };
     voicemailEnabled?: boolean;
+    callPermission?: string;
   }>();
+
+  if (body.action === "setCallPermission") {
+    if (!CALL_PERMISSION_LEVELS.includes((body.callPermission ?? "") as never)) {
+      return c.json({ error: `callPermission must be one of: ${CALL_PERMISSION_LEVELS.join(", ")}` }, 400);
+    }
+    await c.env.DB.prepare(
+      `UPDATE mappings SET call_permission = ?, target_payload = json_set(target_payload, '$.callPermission', ?)
+       WHERE project_id = ? AND target_type = 'person'`,
+    )
+      .bind(body.callPermission, body.callPermission, projectId)
+      .run();
+    return c.json({ ok: true });
+  }
 
   if (body.action === "setVoicemail") {
     const enabled = body.voicemailEnabled === true;

@@ -287,6 +287,14 @@ export class WebexClient {
     return this.request("DELETE", `/telephony/config/callRouting/translationPatterns/${translationPatternId}`);
   }
 
+  /** Custom outgoing calling permissions for a person. */
+  setOutgoingPermission(personId: string, callingPermissions: { callType: string; action: string; transferEnabled: boolean }[]) {
+    return this.request("PUT", `/people/${personId}/features/outgoingPermission`, {
+      useCustomEnabled: true,
+      callingPermissions,
+    });
+  }
+
   setVoicemail(personId: string, enabled: boolean, customNoAnswerGreeting = false) {
     return this.request("PUT", `/people/${personId}/features/voicemail`, {
       enabled,

@@ -209,6 +209,26 @@ describe("hunt group agent details", () => {
   });
 });
 
+describe("callPermissionsFor (cumulative classes)", () => {
+  it("internal allows only internal", async () => {
+    const { callPermissionsFor } = await import("../src/mapping/engine");
+    const perms = callPermissionsFor("internal");
+    expect(perms.find((p) => p.callType === "INTERNAL_CALL")!.action).toBe("ALLOW");
+    expect(perms.find((p) => p.callType === "TOLL_FREE")!.action).toBe("BLOCK");
+    expect(perms.find((p) => p.callType === "NATIONAL")!.action).toBe("BLOCK");
+    expect(perms.find((p) => p.callType === "INTERNATIONAL")!.action).toBe("BLOCK");
+  });
+  it("national includes toll free and internal but not international", async () => {
+    const { callPermissionsFor } = await import("../src/mapping/engine");
+    const perms = callPermissionsFor("national");
+    expect(perms.filter((p) => p.action === "ALLOW").map((p) => p.callType).sort()).toEqual(["INTERNAL_CALL", "NATIONAL", "TOLL_FREE"]);
+  });
+  it("international allows everything", async () => {
+    const { callPermissionsFor } = await import("../src/mapping/engine");
+    expect(callPermissionsFor("international").every((p) => p.action === "ALLOW")).toBe(true);
+  });
+});
+
 describe("buildCallParkMapping", () => {
   it("maps a literal park number", async () => {
     const { buildCallParkMapping } = await import("../src/mapping/engine");

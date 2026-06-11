@@ -17,6 +17,14 @@ const TYPE_LABELS: Record<string, string> = {
 
 type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
 
+// Cumulative outgoing-call permission classes (each includes the ones above it).
+const CALL_PERMISSIONS: { value: string; label: string }[] = [
+  { value: "internal", label: "Internal" },
+  { value: "toll_free", label: "Toll free" },
+  { value: "national", label: "National" },
+  { value: "international", label: "International" },
+];
+
 // Editable payload fields per mapping type — every pattern is user-correctable.
 const EDIT_FIELDS: Record<string, { key: string; label: string; hint?: string }[]> = {
   person: [
@@ -213,6 +221,24 @@ export function ReviewPage() {
               <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
                 {type === "person" && (
                   <>
+                    <select
+                      defaultValue=""
+                      title="Set call permission class for every person"
+                      style={{ padding: "4px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit", fontSize: 12 }}
+                      onChange={async (e) => {
+                        if (!e.target.value) return;
+                        await api.post(`/api/projects/${projectId}/mappings/bulk`, { action: "setCallPermission", callPermission: e.target.value });
+                        e.target.value = "";
+                        load();
+                      }}
+                    >
+                      <option value="">Calls for all…</option>
+                      {CALL_PERMISSIONS.map((c) => (
+                        <option key={c.value} value={c.value}>
+                          {c.label}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       className="btn sm"
                       title="Provision voicemail for every person"
@@ -272,6 +298,7 @@ export function ReviewPage() {
                   <th>Number / Ext</th>
                   <th>Location</th>
                   {type === "person" && <th title="Provision voicemail on Webex">VM</th>}
+                  {type === "person" && <th title="Outgoing call permission class — each level includes the ones below it">Calls</th>}
                   <th>Readiness</th>
                   <th>Notes</th>
                   <th style={{ width: 44 }}></th>
@@ -372,6 +399,27 @@ export function ReviewPage() {
                               setMappings((prev) => prev?.map((x) => (x.id === m.id ? updated : x)) ?? null);
                             }}
                           />
+                        </td>
+                      )}
+                      {type === "person" && (
+                        <td>
+                          <select
+                            value={p.callPermission ?? "international"}
+                            title="Outgoing call permission class"
+                            style={{ padding: "3px 6px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit", fontSize: 12 }}
+                            onChange={async (e) => {
+                              const updated = await api.patch<Mapping>(`/api/projects/${projectId}/mappings/${m.id}`, {
+                                callPermission: e.target.value,
+                              });
+                              setMappings((prev) => prev?.map((x) => (x.id === m.id ? updated : x)) ?? null);
+                            }}
+                          >
+                            {CALL_PERMISSIONS.map((c) => (
+                              <option key={c.value} value={c.value}>
+                                {c.label}
+                              </option>
+                            ))}
+                          </select>
                         </td>
                       )}
                       <td>

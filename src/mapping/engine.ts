@@ -555,6 +555,30 @@ export async function listUnattachedDns(env: Env, projectId: string): Promise<Un
     });
 }
 
+/**
+ * Cumulative outgoing-call permission classes. Each level includes all the
+ * levels below it: internal < toll_free < national < international.
+ */
+export const CALL_PERMISSION_LEVELS = ["internal", "toll_free", "national", "international"] as const;
+export type CallPermissionLevel = (typeof CALL_PERMISSION_LEVELS)[number];
+
+const PERMISSION_CALL_TYPES: { type: string; rank: number }[] = [
+  { type: "INTERNAL_CALL", rank: 0 },
+  { type: "TOLL_FREE", rank: 1 },
+  { type: "NATIONAL", rank: 2 },
+  { type: "INTERNATIONAL", rank: 3 },
+];
+
+/** Webex outgoingPermission entries for a class (ALLOW everything at or below the level). */
+export function callPermissionsFor(level: CallPermissionLevel): { callType: string; action: "ALLOW" | "BLOCK"; transferEnabled: boolean }[] {
+  const rank = CALL_PERMISSION_LEVELS.indexOf(level);
+  return PERMISSION_CALL_TYPES.map((t) => ({
+    callType: t.type,
+    action: t.rank <= rank ? "ALLOW" : "BLOCK",
+    transferEnabled: t.rank <= rank,
+  }));
+}
+
 /** Most common non-null value, or null. */
 function mostCommon(values: (string | null | undefined)[]): string | null {
   const counts = new Map<string, number>();
@@ -699,7 +723,14 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
       if (confidence === "green") confidence = "amber";
     }
     const site = siteOf(user.userid);
-    upsert("user", user.id, "person", { ...payload, cucmSite: site, locationName: locationFor(site), sharedLineWith: sharedWith }, confidence, notes);
+    upsert(
+      "user",
+      user.id,
+      "person",
+      { ...payload, cucmSite: site, locationName: locationFor(site), sharedLineWith: sharedWith, callPermission: "international" },
+      confidence,
+      notes,
+    );
   }
   for (const pilot of pilots) {
     const memberDns = membersByPilot.get(pilot.pattern) ?? [];
@@ -794,6 +825,13 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   await env.DB.prepare(
     `UPDATE mappings SET target_payload = json_set(target_payload, '$.voicemail', json(CASE vm_override WHEN 1 THEN 'true' ELSE 'false' END))
      WHERE project_id = ? AND target_type = 'person' AND vm_override IS NOT NULL AND status = 'auto'`,
+  )
+    .bind(projectId)
+    .run();
+  // Re-apply chosen call-permission classes (default is international).
+  await env.DB.prepare(
+    `UPDATE mappings SET target_payload = json_set(target_payload, '$.callPermission', call_permission)
+     WHERE project_id = ? AND target_type = 'person' AND call_permission IS NOT NULL AND status = 'auto'`,
   )
     .bind(projectId)
     .run();

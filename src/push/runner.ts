@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { CALL_PERMISSION_LEVELS, callPermissionsFor, type CallPermissionLevel } from "../mapping/engine";
 import { nowIso, uuid } from "../lib/util";
 import { pickCallingLicense, WebexClient, WebexError } from "../webex/client";
 
@@ -270,6 +271,15 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
       await appendError(env, item.id, "Number/extension already assigned in Webex (shared line) — created without a number; assign manually if needed");
     } else {
       await applyVoicemail(env, client, item.id, person.id, payload);
+      // Outgoing call permission class (cumulative): internal < toll free < national < international.
+      const level = (CALL_PERMISSION_LEVELS as readonly string[]).includes(payload.callPermission)
+        ? (payload.callPermission as CallPermissionLevel)
+        : "international";
+      try {
+        await client.setOutgoingPermission(person.id, callPermissionsFor(level));
+      } catch (e) {
+        await appendError(env, item.id, `Setting call permission class "${level}" failed: ${e instanceof Error ? e.message : e}`);
+      }
     }
   } else if (item.target_type === "workspace") {
     const loc = await resolveLocation();
