@@ -376,8 +376,6 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
       extension: payload.extension,
       firstName: "Auto",
       lastName: payload.name,
-      extensionDialing: "GROUP",
-      nameDialing: "FIRST_THEN_LAST",
       businessSchedule: scheduleName,
       businessHoursMenu: menu,
       afterHoursMenu: menu,
