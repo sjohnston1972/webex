@@ -42,6 +42,64 @@ function ThemeToggle() {
   );
 }
 
+function PipelinePanel({ projectId, pathname }: { projectId: string; pathname: string }) {
+  const [summary, setSummary] = useState<Summary | null>(null);
+
+  useEffect(() => {
+    api.get<Summary>(`/api/projects/${projectId}/summary`).then(setSummary).catch(() => setSummary(null));
+  }, [projectId, pathname]);
+
+  if (!summary) return null;
+  const total = Object.values(summary.counts).reduce((a, b) => a + b, 0);
+  const mapTotals = { green: 0, amber: 0, red: 0 };
+  for (const m of summary.mappings) mapTotals[m.confidence as "green" | "amber" | "red"] += m.n;
+  const selected = (summary.mappingsByType ?? []).reduce((a, m) => a + (m.selected ?? 0), 0);
+  const latestBatch = summary.batches[0];
+
+  const Row = ({ label, dot, value }: { label: string; dot: string; value: string }) => (
+    <div className="pipe-row">
+      <span className="pipe-label">{label}</span>
+      <span className="pipe-value">
+        <span title={value}>{value}</span>
+        <span className={`pipe-dot ${dot}`} />
+      </span>
+    </div>
+  );
+
+  return (
+    <div className="pipeline">
+      <div className="nav-section">Pipeline</div>
+      <Row label="Source" dot={total > 0 ? "green" : "grey"} value={total > 0 ? `${total} objects` : "none"} />
+      <Row
+        label="CUCM (AXL)"
+        dot={summary.axl?.verified_at ? "green" : summary.axl ? "amber" : "grey"}
+        value={summary.axl?.verified_at ? `CUCM ${summary.axl.cucm_version ?? ""}` : summary.axl ? "unverified" : "not linked"}
+      />
+      <Row
+        label="Unity (CUPI)"
+        dot={summary.unity?.verified_at ? "green" : summary.unity ? "amber" : "grey"}
+        value={summary.unity?.verified_at ? `Unity ${summary.unity.unity_version ?? ""}` : summary.unity ? "unverified" : "not linked"}
+      />
+      <Row
+        label="Mappings"
+        dot={mapTotals.red > 0 ? "red" : mapTotals.amber > 0 ? "amber" : mapTotals.green > 0 ? "green" : "grey"}
+        value={mapTotals.green + mapTotals.amber + mapTotals.red > 0 ? `${mapTotals.green}✓ ${mapTotals.amber}! ${mapTotals.red}✗` : "none"}
+      />
+      <Row label="Selected" dot={selected > 0 ? "blue" : "grey"} value={String(selected)} />
+      <Row
+        label="Webex"
+        dot={summary.webex ? "green" : "grey"}
+        value={summary.webex ? (summary.webex.org_name && !summary.webex.org_name.startsWith("Y2lzY29zcGFyaz") ? summary.webex.org_name : "connected") : "not linked"}
+      />
+      <Row
+        label="Last batch"
+        dot={latestBatch ? (latestBatch.status === "pushed" ? "green" : latestBatch.status === "failed" ? "red" : latestBatch.status.includes("roll") ? "grey" : "blue") : "grey"}
+        value={latestBatch ? latestBatch.status.replace(/_/g, " ") : "none"}
+      />
+    </div>
+  );
+}
+
 function Sidebar() {
   const location = useLocation();
   const projectMatch = location.pathname.match(/^\/projects\/([^/]+)/);
@@ -67,6 +125,7 @@ function Sidebar() {
           </>
         )}
       </nav>
+      {projectId && <PipelinePanel projectId={projectId} pathname={location.pathname} />}
       <div className="sidebar-foot" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
         <span>Workers · D1 · R2</span>
         <ThemeToggle />
