@@ -22,6 +22,7 @@ type ItemRow = {
   push_status: string;
   webex_resource_id: string | null;
   rollback_info: string | null;
+  error_text: string | null;
   project_id: string;
   target_type: string;
   target_payload: string;
@@ -121,7 +122,7 @@ async function releaseWaitingJobs(env: Env, batchId: string): Promise<number> {
 
 async function loadItem(env: Env, batchItemId: string): Promise<ItemRow | null> {
   return env.DB.prepare(
-    `SELECT bi.id, bi.batch_id, bi.mapping_id, bi.push_status, bi.webex_resource_id, bi.rollback_info,
+    `SELECT bi.id, bi.batch_id, bi.mapping_id, bi.push_status, bi.webex_resource_id, bi.rollback_info, bi.error_text,
             b.project_id, m.target_type, m.target_payload
      FROM batch_items bi
      JOIN batches b ON b.id = bi.batch_id
@@ -197,10 +198,19 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     return loc;
   };
 
+  // If this item already errored on an earlier attempt, an "existing" object
+  // found now was almost certainly created by that attempt (created-then-5xx)
+  // — attribute it to this batch so rollback can remove it.
+  const retriedAfterError = !!item.error_text;
+
   if (item.target_type === "person") {
     const existing = payload.email ? await client.findPersonByEmail(payload.email) : null;
     if (existing) {
-      await recordSuccess(env, item.id, existing.id, { created: false, note: "already existed" });
+      await recordSuccess(env, item.id, existing.id, {
+        created: retriedAfterError,
+        note: retriedAfterError ? "created by an earlier attempt of this batch" : "already existed",
+        type: "person",
+      });
       if (payload.voicemail) {
         await appendError(env, item.id, "Person already existed — applied voicemail settings to the existing person");
         await applyVoicemail(env, client, item.id, existing.id, payload);
@@ -343,7 +353,11 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     // previous attempt, or CUCM descriptions colliding on name).
     const existing = (await client.listTranslationPatterns()).find((t: any) => t.matchingPattern === payload.matchingPattern);
     if (existing) {
-      await recordSuccess(env, item.id, existing.id, { created: false, type: "translation_pattern", note: "already existed" });
+      await recordSuccess(env, item.id, existing.id, {
+        created: retriedAfterError,
+        type: "translation_pattern",
+        note: retriedAfterError ? "created by an earlier attempt of this batch" : "already existed",
+      });
       return;
     }
     // CUCM descriptions are not unique — suffix with the pattern.

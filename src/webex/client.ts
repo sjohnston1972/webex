@@ -133,7 +133,12 @@ export class WebexClient {
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
 
-      if (res.status === 429 || res.status >= 500) {
+      // 429 = rejected before processing, always safe to retry. 5xx may have
+      // committed server-side — never auto-retry non-idempotent POSTs on 5xx
+      // (a re-POST after a created-but-timed-out person produces a 409 and a
+      // resource the batch doesn't know it owns).
+      const idempotent = method === "GET" || method === "PUT" || method === "DELETE";
+      if (res.status === 429 || (res.status >= 500 && idempotent)) {
         const retryAfter = Number(res.headers.get("Retry-After") ?? "0");
         const waitMs = retryAfter > 0 ? retryAfter * 1000 : 1000 * (attempt + 1);
         if (attempt < 3) {
