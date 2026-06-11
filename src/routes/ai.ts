@@ -56,13 +56,25 @@ ${mapping.notes ?? "(none)"}`;
 
   let lastError = "";
   for (const model of MODELS) {
-    try {
-      const result = (await c.env.AI.run(model as any, { messages, max_tokens: 900 })) as unknown as Record<string, unknown>;
-      const reply = extractReply(result);
-      if (reply) return c.json({ reply, model });
-      lastError = `model ${model} returned an empty/unrecognised response`;
-    } catch (e) {
-      lastError = `${model}: ${e instanceof Error ? e.message : e}`;
+    // gpt-oss models speak the Responses API (instructions + input), not chat messages.
+    const inputs: Record<string, unknown>[] = model.includes("gpt-oss")
+      ? [
+          {
+            instructions: messages.filter((m) => m.role === "system").map((m) => m.content).join("\n\n"),
+            input: messages.filter((m) => m.role !== "system").map((m) => `${m.role.toUpperCase()}: ${m.content}`).join("\n\n"),
+          },
+          { messages, max_tokens: 900 },
+        ]
+      : [{ messages, max_tokens: 900 }];
+    for (const input of inputs) {
+      try {
+        const result = (await c.env.AI.run(model as any, input as any)) as unknown as Record<string, unknown>;
+        const reply = extractReply(result);
+        if (reply) return c.json({ reply, model });
+        lastError = `model ${model} returned an empty/unrecognised response`;
+      } catch (e) {
+        lastError = `${model}: ${e instanceof Error ? e.message : e}`;
+      }
     }
   }
   return c.json({ error: `AI request failed: ${lastError}` }, 502);
