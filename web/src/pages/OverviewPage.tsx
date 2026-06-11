@@ -66,6 +66,17 @@ const TILE_SPECS: Record<string, TileSpec> = {
     { key: "filename", label: "File" },
     { key: "matched_alias", label: "Matched mailbox" },
   ] },
+  call_handlers: { title: "Unity call handlers", fetch: (id) => `/api/projects/${id}/objects/call_handlers`, columns: [
+    { key: "name", label: "Handler" },
+    { key: "extension", label: "Extension" },
+    { key: "menu", label: "Menu keys", render: (r) => {
+      try {
+        const menu = JSON.parse(r.menu_json ?? "[]") as any[];
+        const live = menu.filter((m) => String(m.Action ?? "0") !== "0");
+        return live.length ? live.map((m) => m.TouchtoneKey).join(", ") : "—";
+      } catch { return "—"; }
+    } },
+  ] },
   trans_patterns: { title: "Translation patterns", fetch: (id) => `/api/projects/${id}/objects/trans_patterns`, columns: [
     { key: "pattern", label: "Pattern" },
     { key: "called_party_mask", label: "Mask" },
@@ -175,6 +186,7 @@ const COUNT_LABELS: Record<string, string> = {
   pickup_groups: "Pickup groups",
   vm_boxes: "Unity mailboxes",
   vm_greetings: "Greeting files",
+  call_handlers: "Call handlers",
   trans_patterns: "Translation patterns",
   dialplan: "Dial plan objects",
 };
