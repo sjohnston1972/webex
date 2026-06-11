@@ -2,6 +2,7 @@ import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom
 import { api } from "../api";
 import { Card, Empty, IngestCounts, Modal, Pill, Spinner } from "../components";
 import { ChatModal, ChatTopic } from "../ChatModal";
+import { ingestMethod } from "./SourcePage";
 import type { ProjectContext } from "../App";
 import { useEffect, useState } from "react";
 
@@ -414,9 +415,9 @@ export function OverviewPage() {
             <tbody>
               {summary.snapshots.slice(0, 6).map((s) => (
                 <tr key={s.id}>
-                  <td>{new Date(s.created_at + "Z").toLocaleString()}</td>
-                  <td>{s.type.toUpperCase()}</td>
-                  <td>{s.source === "axl" ? "AXL pull" : "File upload"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{new Date(s.created_at + "Z").toLocaleString()}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{s.type.toUpperCase()}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{ingestMethod(s.source)}</td>
                   <td>
                     <Pill tone={s.status === "parsed" ? "green" : s.status === "failed" ? "red" : "blue"}>{s.status}</Pill>
                   </td>

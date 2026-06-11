@@ -164,8 +164,13 @@ describe("recheckMapping (after user edit)", () => {
     expect(after.confidence).toBe("amber"); // fixed — verify-semantics note remains
   });
   it("keeps a person blocked while the email is invalid, clears when fixed", () => {
-    expect(recheckMapping("person", { email: "not-an-email", extension: "1001" }).confidence).toBe("red");
-    expect(recheckMapping("person", { email: "a@b.com", extension: "1001" }).confidence).toBe("green");
+    expect(recheckMapping("person", { email: "not-an-email", extension: "1001", locationName: "HQ" }).confidence).toBe("red");
+    expect(recheckMapping("person", { email: "a@b.com", extension: "1001", locationName: "HQ" }).confidence).toBe("green");
+  });
+  it("flags a missing location on edit", () => {
+    const r = recheckMapping("person", { email: "a@b.com", extension: "1001" });
+    expect(r.confidence).toBe("amber");
+    expect(r.notes.join(" ")).toMatch(/No Webex location/);
   });
   it("validates route pattern syntax on edit", () => {
     expect(recheckMapping("route_pattern", { dialPattern: "9@" }).confidence).toBe("red");

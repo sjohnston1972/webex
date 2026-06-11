@@ -4,6 +4,15 @@ import { api } from "../api";
 import { Alert, Card, Empty, IngestCounts, Pill, Spinner } from "../components";
 import type { ProjectContext } from "../App";
 
+export function ingestMethod(source: string): string {
+  switch (source) {
+    case "axl": return "AXL pull";
+    case "cupi": return "CUPI pull";
+    case "cupi-greetings": return "CUPI greetings";
+    default: return "File upload";
+  }
+}
+
 export function SourcePage() {
   const { summary, reload } = useOutletContext<ProjectContext>();
   const { projectId } = useParams();
@@ -35,9 +44,9 @@ export function SourcePage() {
             <tbody>
               {summary.snapshots.map((s) => (
                 <tr key={s.id}>
-                  <td>{new Date(s.created_at + "Z").toLocaleString()}</td>
-                  <td>{s.type.toUpperCase()}</td>
-                  <td>{s.source === "axl" ? "AXL pull" : "File upload"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{new Date(s.created_at + "Z").toLocaleString()}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{s.type.toUpperCase()}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{ingestMethod(s.source)}</td>
                   <td>
                     <Pill tone={s.status === "parsed" ? "green" : s.status === "failed" ? "red" : "blue"}>{s.status}</Pill>
                   </td>
