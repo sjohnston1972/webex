@@ -209,6 +209,14 @@ export function OverviewPage() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const [tile, setTile] = useState<TileSpec | null>(null);
+  const [issues, setIssues] = useState<{ severity: "red" | "amber" | "info"; title: string; detail: string }[] | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ issues: { severity: "red" | "amber" | "info"; title: string; detail: string }[] }>(`/api/projects/${projectId}/issues`)
+      .then((r) => setIssues(r.issues))
+      .catch(() => setIssues([]));
+  }, [projectId, summary]);
 
   const total = Object.values(summary.counts).reduce((a, b) => a + b, 0);
   const mapTotals = { green: 0, amber: 0, red: 0, selected: 0 };
@@ -229,6 +237,36 @@ export function OverviewPage() {
         <h1 className="page-title">{summary.project.name}</h1>
         <p className="page-desc">Created {new Date(summary.project.created_at + "Z").toLocaleString()} · ID <span className="mono">{summary.project.id}</span></p>
       </div>
+
+      <Card
+        title="Attention"
+        sub={issues === null ? "checking…" : issues.length === 0 ? "no issues found" : `${issues.length} item(s)`}
+        tight
+      >
+        {issues === null ? (
+          <div className="card-body">
+            <Spinner /> <span className="dim small">Checking licence capacity and readiness…</span>
+          </div>
+        ) : issues.length === 0 ? (
+          <div className="card-body">
+            <Pill tone="green">all clear</Pill> <span className="dim small">No capacity or readiness issues detected for the current scope.</span>
+          </div>
+        ) : (
+          <table className="data">
+            <tbody>
+              {issues.map((iss, i) => (
+                <tr key={i}>
+                  <td style={{ width: 90 }}>
+                    <Pill tone={iss.severity === "info" ? "blue" : iss.severity}>{iss.severity === "red" ? "blocking" : iss.severity === "amber" ? "review" : "info"}</Pill>
+                  </td>
+                  <td style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{iss.title}</td>
+                  <td className="notes">{iss.detail}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
 
       <div className="tiles">
         {Object.entries(COUNT_LABELS).map(([key, label]) => (

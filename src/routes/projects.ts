@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { AppContext } from "../env";
 import { uuid } from "../lib/util";
 import { listUnattachedDns } from "../mapping/engine";
+import { pickCallingLicense, WebexClient } from "../webex/client";
 
 const SRC_TABLES = [
   "src_users",
@@ -107,6 +108,91 @@ projects.get("/:id/summary", async (c) => {
     unity: unity ?? null,
     webex: webex ?? null,
   });
+});
+
+// Proactive readiness issues: capacity shortfalls, missing prerequisites,
+// blocked items — surfaced on the dashboard before anyone dry-runs.
+projects.get("/:id/issues", async (c) => {
+  const id = c.req.param("id");
+  type Issue = { severity: "red" | "amber" | "info"; title: string; detail: string };
+  const issues: Issue[] = [];
+
+  const mappings = (
+    await c.env.DB.prepare("SELECT target_type, target_payload, confidence, selected FROM mappings WHERE project_id = ?")
+      .bind(id)
+      .all<{ target_type: string; target_payload: string; confidence: string; selected: number }>()
+  ).results;
+  const parsed = mappings.map((m) => ({ ...m, p: JSON.parse(m.target_payload) }));
+
+  // Demand: selected items if anything is selected, otherwise everything eligible.
+  const anySelected = parsed.some((m) => m.selected === 1);
+  const scope = anySelected ? parsed.filter((m) => m.selected === 1) : parsed;
+  const scopeWord = anySelected ? "selected" : "eligible (nothing selected yet)";
+
+  const callingDemand = scope.filter((m) => m.target_type === "person" && (m.p.extension || m.p.phoneNumber)).length;
+  const workspaceDemand = scope.filter((m) => m.target_type === "workspace").length;
+
+  // Licence supply — needs a connected Webex org.
+  const tokens = await c.env.DB.prepare("SELECT project_id FROM webex_tokens WHERE project_id = ?").bind(id).first();
+  if (!tokens) {
+    if (mappings.length > 0) issues.push({ severity: "amber", title: "Webex not connected", detail: "Connect the target org to check licence capacity, locations and numbers." });
+  } else {
+    try {
+      const client = await WebexClient.forProject(c.env, id);
+      const licenses = await client.listLicenses();
+      const calling = licenses.find((l: any) => /webex calling.*professional/i.test(l.name)) ?? pickCallingLicense(licenses);
+      if (calling && calling.totalUnits !== undefined) {
+        const free = calling.totalUnits - calling.consumedUnits;
+        if (callingDemand > free) {
+          issues.push({
+            severity: "red",
+            title: "Calling licence shortfall",
+            detail: `${callingDemand} ${scopeWord} people need Webex Calling, but only ${free} of ${calling.totalUnits} "${calling.name}" seats are free. Reduce scope or add licences before pushing.`,
+          });
+        }
+      }
+      const ws = licenses.find((l: any) => /webex calling.*workspaces/i.test(l.name));
+      if (ws && ws.totalUnits !== undefined && workspaceDemand > ws.totalUnits - ws.consumedUnits) {
+        issues.push({
+          severity: "red",
+          title: "Workspace licence shortfall",
+          detail: `${workspaceDemand} ${scopeWord} workspaces vs ${ws.totalUnits - ws.consumedUnits} free "${ws.name}" seats.`,
+        });
+      }
+    } catch (e) {
+      issues.push({ severity: "amber", title: "Licence check unavailable", detail: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  // Missing prerequisites on selected items.
+  const LOCATION_TYPES = ["person", "workspace", "hunt_group", "call_pickup", "call_park", "auto_attendant"];
+  const noLocation = scope.filter((m) => LOCATION_TYPES.includes(m.target_type) && !m.p.locationName).length;
+  if (noLocation > 0) {
+    issues.push({ severity: "red", title: "Missing Webex location", detail: `${noLocation} ${scopeWord} item(s) have no location — map CUCM sites or apply a fallback location on Review & select.` });
+  }
+  const noRoute = scope.filter((m) => m.target_type === "route_pattern" && !m.p.routeChoice).length;
+  if (noRoute > 0) {
+    issues.push({ severity: "amber", title: "Route patterns without a route target", detail: `${noRoute} ${scopeWord} route pattern(s) need a trunk or route group ("Route via" on Review & select).` });
+  }
+
+  // Blocked items, by type.
+  const blocked = mappings.filter((m) => m.confidence === "red");
+  if (blocked.length > 0) {
+    const byType = new Map<string, number>();
+    for (const b of blocked) byType.set(b.target_type, (byType.get(b.target_type) ?? 0) + 1);
+    issues.push({
+      severity: "amber",
+      title: `${blocked.length} blocked mapping(s)`,
+      detail: [...byType.entries()].map(([t, n]) => `${n} ${t.replace(/_/g, " ")}`).join(", ") + " — fix via Edit on Review & select, or leave excluded.",
+    });
+  }
+
+  const unattached = (await listUnattachedDns(c.env, id)).length;
+  if (unattached > 0) {
+    issues.push({ severity: "info", title: `${unattached} unattached directory numbers`, detail: "DNs with no migration path (CTI ports, secondary lines) — listed in the readiness report." });
+  }
+
+  return c.json({ issues, callingDemand, workspaceDemand });
 });
 
 projects.delete("/:id", async (c) => {
