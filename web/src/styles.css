@@ -190,6 +190,9 @@ body {
   animation: rise 0.15s ease;
 }
 .pipe-row:hover .pipe-pop { display: block; }
+/* lower rows sit near the viewport bottom — anchor their popovers upward */
+.pipe-row:nth-last-child(-n + 4) .pipe-pop { top: auto; bottom: -8px; }
+.pipe-pop-body { max-height: 56vh; overflow-y: auto; }
 .pipe-pop-head {
   padding: 9px 13px;
   font-size: 12px;
