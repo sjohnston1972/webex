@@ -200,6 +200,7 @@ table.data td { word-break: break-word; }
   display: flex;
   align-items: center;
   gap: 10px;
+  background: linear-gradient(90deg, var(--green-tint), rgba(127, 181, 65, 0.05) 45%, transparent 75%);
 }
 .card-title { font-size: 14px; font-weight: 600; margin: 0; display: flex; align-items: center; gap: 8px; }
 .card-title::before {
