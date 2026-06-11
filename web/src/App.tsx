@@ -22,6 +22,26 @@ const STAGES = [
   { path: "reports", step: "Stage 5", name: "Reports" },
 ];
 
+function ThemeToggle() {
+  const [dark, setDark] = useState(document.documentElement.dataset.theme === "dark");
+  const toggle = () => {
+    const next = !dark;
+    setDark(next);
+    if (next) {
+      document.documentElement.dataset.theme = "dark";
+      localStorage.setItem("wx-theme", "dark");
+    } else {
+      delete document.documentElement.dataset.theme;
+      localStorage.setItem("wx-theme", "light");
+    }
+  };
+  return (
+    <button className="theme-toggle" onClick={toggle} title="Toggle dark mode">
+      {dark ? "☀ Light" : "☾ Dark"}
+    </button>
+  );
+}
+
 function Sidebar() {
   const location = useLocation();
   const projectMatch = location.pathname.match(/^\/projects\/([^/]+)/);
@@ -47,7 +67,10 @@ function Sidebar() {
           </>
         )}
       </nav>
-      <div className="sidebar-foot">Cloudflare Workers · D1 · R2</div>
+      <div className="sidebar-foot" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <span>Workers · D1 · R2</span>
+        <ThemeToggle />
+      </div>
     </aside>
   );
 }
