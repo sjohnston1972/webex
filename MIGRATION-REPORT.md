@@ -107,7 +107,14 @@ honestly recorded it as pre-existing. Two fixes shipped:
 
 The 16 stranded objects were verified as batch-created via their Webex
 `created` timestamps (all 22:42 UTC, two minutes into the push), re-attributed,
-and rolled back. **Final state: 94/94 rolled back, Calling Professional licences
+and rolled back.
+
+**Correction to the failure analysis above:** this same bug — not shared
+lines — was the true cause of the "23 people 409" failures. Post-run analysis
+shows no two users in this lab share a primary extension. Shared-line handling
+remains in the tool (sharers are kept and annotated; Webex permits one primary
+owner per number, with shared line appearances configured on devices), but it
+was not a factor in this migration. **Final state: 94/94 rolled back, Calling Professional licences
 0/30, zero workspaces and zero translation patterns remain in the org.** The
 Workspaces licence counter briefly displayed a stale 5/30 after deletion — the
 workspaces list itself confirms zero.
@@ -119,8 +126,10 @@ workspaces list itself confirms zero.
 2. **Domains:** dCloud system identities (`@dcloud.cisco.com` bots) should be
    excluded from migration scope; real customers should verify their domain in
    Control Hub first.
-3. **Shared lines:** 23 users share extensions in CUCM. Webex has no shared-line
-   parity for this pattern — review whether these should be workspaces, virtual
-   lines, or single owners (the tool now flags them at mapping time).
+3. **Shared lines:** none exist in this lab (earlier attribution corrected —
+   see rollback addendum). Where they exist in real estates, the tool keeps the
+   number on every sharer and annotates the mapping: one person becomes the
+   primary owner, the rest are created numberless for shared line appearances
+   to be configured on their devices in Control Hub.
 4. Dial-plan digit manipulation (4 blocked TPs) needs manual Control Hub design,
    as scoped.
