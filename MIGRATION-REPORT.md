@@ -90,6 +90,28 @@ report with reasons.
 - Rollback: available per batch — deletes exactly what this batch created,
   in reverse dependency order.
 
+## Rollback addendum (2026-06-11)
+
+The full batch was rolled back. First pass removed 78 of 94 objects; **16 items
+(13 people, 3 translation patterns) were skipped** because their rollback info
+said "already existed — not created by this batch". Root cause: the Webex
+client auto-retried POSTs on 5xx responses, but POSTs are not idempotent — a
+create that succeeded server-side then timed out was re-POSTed, returned 409,
+and the item was marked failed; the next push pass found the object and
+honestly recorded it as pre-existing. Two fixes shipped:
+
+1. POSTs are never auto-retried on 5xx (only on 429, which is rejected before
+   processing). GET/PUT/DELETE retry as before.
+2. When a *retried* batch item finds its object already existing, creation is
+   attributed to the batch (so rollback owns it).
+
+The 16 stranded objects were verified as batch-created via their Webex
+`created` timestamps (all 22:42 UTC, two minutes into the push), re-attributed,
+and rolled back. **Final state: 94/94 rolled back, Calling Professional licences
+0/30, zero workspaces and zero translation patterns remain in the org.** The
+Workspaces licence counter briefly displayed a stale 5/30 after deletion — the
+workspaces list itself confirms zero.
+
 ## Recommendations
 
 1. **Licences:** size the target org before cutover — readiness shows 74
