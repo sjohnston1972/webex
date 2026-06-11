@@ -937,7 +937,7 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   }
   for (const rp of routePatterns) {
     const built = buildRoutePatternMapping(rp);
-    let { confidence } = built;
+    let confidence: "green" | "amber" | "red" = built.confidence;
     const { payload, notes } = built;
     const saved = savedRouteChoices.get(rp.id);
     if (saved?.id) {
