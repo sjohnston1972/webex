@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { CALL_PERMISSION_LEVELS, generateMappings, recheckMapping } from "../mapping/engine";
+import { CALL_PERMISSION_LEVELS, generateMappings, NO_LOCATION_NOTE, recheckMapping } from "../mapping/engine";
 
 export const mappings = new Hono<AppContext>();
 
@@ -177,14 +177,19 @@ mappings.post("/:id/mappings/bulk", async (c) => {
 
   if (body.action === "setLocation") {
     if (!body.locationName) return c.json({ error: "locationName required" }, 400);
-    const { results } = await c.env.DB.prepare("SELECT id, target_payload FROM mappings WHERE project_id = ?")
+    const { results } = await c.env.DB.prepare("SELECT id, target_payload, notes FROM mappings WHERE project_id = ?")
       .bind(projectId)
-      .all<{ id: string; target_payload: string }>();
+      .all<{ id: string; target_payload: string; notes: string | null }>();
     for (const row of results) {
       const payload = JSON.parse(row.target_payload);
       payload.locationName = body.locationName;
-      await c.env.DB.prepare("UPDATE mappings SET target_payload = ? WHERE id = ?")
-        .bind(JSON.stringify(payload), row.id)
+      // The "no location" note is resolved by this action — drop it.
+      const notes = (row.notes ?? "")
+        .split("\n")
+        .filter((n) => n && n !== NO_LOCATION_NOTE)
+        .join("\n");
+      await c.env.DB.prepare("UPDATE mappings SET target_payload = ?, notes = ? WHERE id = ?")
+        .bind(JSON.stringify(payload), notes || null, row.id)
         .run();
     }
     return c.json({ ok: true, updated: results.length });

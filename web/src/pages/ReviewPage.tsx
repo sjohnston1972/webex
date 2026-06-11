@@ -451,7 +451,14 @@ export function ReviewPage() {
                           <span className="dim">org-wide</span>
                         ) : (
                           <>
-                            {p.locationName ?? <span className="dim">unset</span>}
+                            {p.locationName ?? (
+                              <span
+                                className="unset-loc"
+                                title="No Webex location assigned — this item cannot validate or push. Map the CUCM site above, apply the fallback location, or use ✎ Edit to pick one."
+                              >
+                                unset
+                              </span>
+                            )}
                             {p.cucmSite && <div className="dim small">CUCM: {p.cucmSite}</div>}
                           </>
                         )}
@@ -532,6 +539,7 @@ export function ReviewPage() {
         <EditMappingModal
           projectId={projectId!}
           mapping={editing}
+          locations={locations}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -543,7 +551,7 @@ export function ReviewPage() {
   );
 }
 
-function EditMappingModal({ projectId, mapping, onClose, onSaved }: { projectId: string; mapping: Mapping; onClose: () => void; onSaved: () => void }) {
+function EditMappingModal({ projectId, mapping, locations, onClose, onSaved }: { projectId: string; mapping: Mapping; locations: string[]; onClose: () => void; onSaved: () => void }) {
   const initial = JSON.parse(mapping.target_payload);
   const fields = EDIT_FIELDS[mapping.target_type] ?? [{ key: "name", label: "Name" }];
   const [values, setValues] = useState<Record<string, string>>(
@@ -577,7 +585,18 @@ function EditMappingModal({ projectId, mapping, onClose, onSaved }: { projectId:
       {fields.map((f) => (
         <div className="field" key={f.key}>
           <label>{f.label}</label>
-          <input value={values[f.key]} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} />
+          {f.key === "locationName" && locations.length > 0 ? (
+            <select value={values[f.key]} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}>
+              <option value="">— no location —</option>
+              {locations.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <input value={values[f.key]} onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))} />
+          )}
           {f.hint && <div className="hint">{f.hint}</div>}
         </div>
       ))}

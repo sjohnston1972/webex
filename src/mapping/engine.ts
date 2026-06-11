@@ -77,6 +77,9 @@ export function recheckMapping(targetType: string, payload: Record<string, any>)
     fixed.unsupported.forEach((c) => blocked(`Dial pattern contains unsupported "${c}"`));
     review("Verify pattern; choose/confirm route target before pushing");
   }
+  if (["person", "workspace", "hunt_group", "call_pickup", "call_park", "auto_attendant"].includes(targetType) && !payload.locationName) {
+    review(NO_LOCATION_NOTE);
+  }
   return { confidence, notes };
 }
 
@@ -660,6 +663,8 @@ export function buildAutoAttendantMapping(handler: SrcCallHandler, targets: Map<
   return { payload, confidence, notes };
 }
 
+export const NO_LOCATION_NOTE = "No Webex location assigned — map the CUCM site to a location, apply a fallback location, or edit this item";
+
 /** Combine a site's E.164 prefix with an extension; null when the result isn't valid E.164. */
 export function e164FromExtension(prefix: string, extension: string): string | null {
   const p = prefix.trim().replace(/[\s().-]/g, "");
@@ -833,11 +838,16 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
         notes.push(`E.164 conversion failed: "${prefix}" + ${payload.extension} is not a valid E.164 number — check the site prefix`);
       }
     }
+    const personLocation = locationFor(site);
+    if (!personLocation) {
+      notes.push(NO_LOCATION_NOTE);
+      if (confidence === "green") confidence = "amber";
+    }
     upsert(
       "user",
       user.id,
       "person",
-      { ...payload, cucmSite: site, locationName: locationFor(site), sharedLineWith: sharedWith, callPermission: "international" },
+      { ...payload, cucmSite: site, locationName: personLocation, sharedLineWith: sharedWith, callPermission: "international" },
       confidence,
       notes,
     );
