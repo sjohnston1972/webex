@@ -209,6 +209,19 @@ describe("hunt group agent details", () => {
   });
 });
 
+describe("e164FromExtension", () => {
+  it("combines prefix and extension into E.164", async () => {
+    const { e164FromExtension } = await import("../src/mapping/engine");
+    expect(e164FromExtension("+44207555", "6016")).toBe("+442075556016");
+    expect(e164FromExtension(" +1 (972) 555", "4100")).toBe("+19725554100");
+  });
+  it("rejects invalid prefixes and over-long results", async () => {
+    const { e164FromExtension } = await import("../src/mapping/engine");
+    expect(e164FromExtension("44207", "6016")).toBeNull();
+    expect(e164FromExtension("+4420755512345", "601678")).toBeNull();
+  });
+});
+
 describe("callPermissionsFor (cumulative classes)", () => {
   it("internal allows only internal", async () => {
     const { callPermissionsFor } = await import("../src/mapping/engine");

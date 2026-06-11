@@ -579,6 +579,14 @@ export function callPermissionsFor(level: CallPermissionLevel): { callType: stri
   }));
 }
 
+/** Combine a site's E.164 prefix with an extension; null when the result isn't valid E.164. */
+export function e164FromExtension(prefix: string, extension: string): string | null {
+  const p = prefix.trim().replace(/[\s().-]/g, "");
+  if (!/^\+\d{1,12}$/.test(p)) return null;
+  const combined = `${p}${extension}`;
+  return /^\+\d{7,15}$/.test(combined) ? combined : null;
+}
+
 /** Most common non-null value, or null. */
 function mostCommon(values: (string | null | undefined)[]): string | null {
   const counts = new Map<string, number>();
@@ -650,12 +658,14 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     }
   }
   const siteToLocation = new Map<string, string>();
+  const siteToPrefix = new Map<string, string>();
   for (const row of (
-    await env.DB.prepare("SELECT cucm_site, webex_location FROM site_mappings WHERE project_id = ?")
+    await env.DB.prepare("SELECT cucm_site, webex_location, e164_prefix FROM site_mappings WHERE project_id = ?")
       .bind(projectId)
-      .all<{ cucm_site: string; webex_location: string | null }>()
+      .all<{ cucm_site: string; webex_location: string | null; e164_prefix: string | null }>()
   ).results) {
     if (row.webex_location) siteToLocation.set(row.cucm_site, row.webex_location);
+    if (row.e164_prefix) siteToPrefix.set(row.cucm_site, row.e164_prefix);
   }
   const siteOf = (userid: string | null | undefined) => (userid ? (siteByUser.get(userid.toLowerCase()) ?? null) : null);
   const locationFor = (site: string | null) => (site ? (siteToLocation.get(site) ?? null) : null);
@@ -723,6 +733,18 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
       if (confidence === "green") confidence = "amber";
     }
     const site = siteOf(user.userid);
+    // Optional per-site E.164 conversion: extension becomes a DID, extension kept.
+    const prefix = site ? siteToPrefix.get(site) : undefined;
+    if (prefix && payload.extension && !payload.phoneNumber) {
+      const did = e164FromExtension(prefix, payload.extension);
+      if (did) {
+        payload.phoneNumber = did;
+        notes.push(`E.164 conversion: extension ${payload.extension} → ${did} (site prefix ${prefix})`);
+      } else {
+        if (confidence === "green") confidence = "amber";
+        notes.push(`E.164 conversion failed: "${prefix}" + ${payload.extension} is not a valid E.164 number — check the site prefix`);
+      }
+    }
     upsert(
       "user",
       user.id,

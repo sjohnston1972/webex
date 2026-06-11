@@ -77,25 +77,36 @@ mappings.get("/:id/site-mappings", async (c) => {
   ).results;
   const saved = new Map(
     (
-      await c.env.DB.prepare("SELECT cucm_site, webex_location FROM site_mappings WHERE project_id = ?")
+      await c.env.DB.prepare("SELECT cucm_site, webex_location, e164_prefix FROM site_mappings WHERE project_id = ?")
         .bind(projectId)
-        .all<{ cucm_site: string; webex_location: string | null }>()
-    ).results.map((r) => [r.cucm_site, r.webex_location]),
+        .all<{ cucm_site: string; webex_location: string | null; e164_prefix: string | null }>()
+    ).results.map((r) => [r.cucm_site, r]),
   );
-  return c.json(sites.map((s) => ({ cucmSite: s.site, phones: s.phones, webexLocation: saved.get(s.site) ?? null })));
+  return c.json(
+    sites.map((s) => ({
+      cucmSite: s.site,
+      phones: s.phones,
+      webexLocation: saved.get(s.site)?.webex_location ?? null,
+      e164Prefix: saved.get(s.site)?.e164_prefix ?? null,
+    })),
+  );
 });
 
 mappings.put("/:id/site-mappings", async (c) => {
   const projectId = c.req.param("id");
-  const body = await c.req.json<{ mappings?: { cucmSite: string; webexLocation: string | null }[] }>();
+  const body = await c.req.json<{ mappings?: { cucmSite: string; webexLocation: string | null; e164Prefix?: string | null }[] }>();
   if (!Array.isArray(body.mappings)) return c.json({ error: "mappings array required" }, 400);
   for (const m of body.mappings) {
     if (!m.cucmSite) continue;
+    const prefix = m.e164Prefix?.trim() || null;
+    if (prefix && !/^\+\d{1,12}$/.test(prefix.replace(/[\s().-]/g, ""))) {
+      return c.json({ error: `E.164 prefix "${prefix}" must be + followed by digits (e.g. +44207555)` }, 400);
+    }
     await c.env.DB.prepare(
-      `INSERT INTO site_mappings (project_id, cucm_site, webex_location) VALUES (?, ?, ?)
-       ON CONFLICT(project_id, cucm_site) DO UPDATE SET webex_location = excluded.webex_location`,
+      `INSERT INTO site_mappings (project_id, cucm_site, webex_location, e164_prefix) VALUES (?, ?, ?, ?)
+       ON CONFLICT(project_id, cucm_site) DO UPDATE SET webex_location = excluded.webex_location, e164_prefix = excluded.e164_prefix`,
     )
-      .bind(projectId, m.cucmSite, m.webexLocation ?? null)
+      .bind(projectId, m.cucmSite, m.webexLocation ?? null, prefix)
       .run();
   }
   return c.json({ saved: body.mappings.length });

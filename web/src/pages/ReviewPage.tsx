@@ -66,7 +66,7 @@ const EDIT_FIELDS: Record<string, { key: string; label: string; hint?: string }[
   ],
 };
 
-type SiteMapping = { cucmSite: string; phones: number; webexLocation: string | null };
+type SiteMapping = { cucmSite: string; phones: number; webexLocation: string | null; e164Prefix: string | null };
 
 export function ReviewPage() {
   const { summary, reload } = useOutletContext<ProjectContext>();
@@ -538,13 +538,16 @@ function SitesCard({ projectId, locations, onSaved }: { projectId: string; locat
   const setSite = (cucmSite: string, webexLocation: string) => {
     setSites((prev) => prev!.map((s) => (s.cucmSite === cucmSite ? { ...s, webexLocation: webexLocation || null } : s)));
   };
+  const setPrefix = (cucmSite: string, e164Prefix: string) => {
+    setSites((prev) => prev!.map((s) => (s.cucmSite === cucmSite ? { ...s, e164Prefix: e164Prefix || null } : s)));
+  };
 
   const save = async () => {
     setBusy(true);
     setMsg(null);
     try {
       await api.put(`/api/projects/${projectId}/site-mappings`, {
-        mappings: sites.map((s) => ({ cucmSite: s.cucmSite, webexLocation: s.webexLocation })),
+        mappings: sites.map((s) => ({ cucmSite: s.cucmSite, webexLocation: s.webexLocation, e164Prefix: s.e164Prefix })),
       });
       setMsg({ tone: "ok", text: "Site mappings saved — regenerating mappings to apply locations." });
       onSaved();
@@ -568,6 +571,7 @@ function SitesCard({ projectId, locations, onSaved }: { projectId: string; locat
             <th>CUCM site</th>
             <th>Phones</th>
             <th>Webex location</th>
+            <th title="Convert user numbers to E.164 on migration: prefix + extension becomes the DID (extension is kept)">E.164 prefix (optional)</th>
           </tr>
         </thead>
         <tbody>
@@ -588,6 +592,15 @@ function SitesCard({ projectId, locations, onSaved }: { projectId: string; locat
                 ) : (
                   <input value={s.webexLocation ?? ""} onChange={(e) => setSite(s.cucmSite, e.target.value)} placeholder="Webex location name" style={{ padding: "5px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit" }} />
                 )}
+              </td>
+              <td>
+                <input
+                  value={s.e164Prefix ?? ""}
+                  onChange={(e) => setPrefix(s.cucmSite, e.target.value)}
+                  placeholder="e.g. +44207555"
+                  className="mono"
+                  style={{ padding: "5px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit", width: 140 }}
+                />
               </td>
             </tr>
           ))}
