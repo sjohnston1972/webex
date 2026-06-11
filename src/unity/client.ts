@@ -89,6 +89,17 @@ export class UnityClient {
     return this.requestBinary(`/handlers/callhandlers/${callHandlerObjectId}/greetings/Standard/greetingstreamfiles/${languageCode}/audio`);
   }
 
+  /** Non-primary call handlers (the real IVR/menu handlers, not per-user mailbox handlers). */
+  async listCallHandlers(): Promise<any[]> {
+    const r = await this.request<any>(`/handlers/callhandlers?query=(IsPrimary%20is%200)&rowsPerPage=200`);
+    return ensureArray(r.Callhandler);
+  }
+
+  async getMenuEntries(callHandlerObjectId: string): Promise<any[]> {
+    const r = await this.request<any>(`/handlers/callhandlers/${callHandlerObjectId}/menuentries`);
+    return ensureArray(r.MenuEntry);
+  }
+
   /** All voicemail users (paged). */
   async listUsers(): Promise<any[]> {
     const users: any[] = [];

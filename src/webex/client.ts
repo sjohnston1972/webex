@@ -214,6 +214,23 @@ export class WebexClient {
     return this.request("DELETE", `/telephony/config/locations/${locationId}/callPickups/${callPickupId}`);
   }
 
+  async listSchedules(locationId: string): Promise<any[]> {
+    const r = await this.request("GET", `/telephony/config/locations/${locationId}/schedules`, undefined, { max: "100" });
+    return r.schedules ?? r.items ?? [];
+  }
+
+  createSchedule(locationId: string, payload: Record<string, unknown>) {
+    return this.request("POST", `/telephony/config/locations/${locationId}/schedules`, payload);
+  }
+
+  createAutoAttendant(locationId: string, payload: Record<string, unknown>) {
+    return this.request("POST", `/telephony/config/locations/${locationId}/autoAttendants`, payload);
+  }
+
+  deleteAutoAttendant(locationId: string, autoAttendantId: string) {
+    return this.request("DELETE", `/telephony/config/locations/${locationId}/autoAttendants/${autoAttendantId}`);
+  }
+
   createCallParkExtension(locationId: string, payload: { name: string; extension: string }) {
     return this.request("POST", `/telephony/config/locations/${locationId}/callParkExtensions`, payload);
   }

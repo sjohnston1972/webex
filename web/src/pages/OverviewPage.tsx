@@ -187,6 +187,7 @@ const ELIGIBLE_LABELS: Record<string, string> = {
   route_pattern: "Route patterns",
   workspace: "Workspaces (common area)",
   call_park: "Call park extensions",
+  auto_attendant: "Auto attendants",
 };
 
 export function OverviewPage() {

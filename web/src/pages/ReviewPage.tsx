@@ -13,6 +13,7 @@ const TYPE_LABELS: Record<string, string> = {
   route_pattern: "Route patterns (→ Webex dial plans, premises PSTN)",
   workspace: "Workspaces (owner-less / common-area phones)",
   call_park: "Call park (→ Webex call park extensions)",
+  auto_attendant: "Auto attendants (Unity call handlers — deselected by default, review menus)",
 };
 
 type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
@@ -62,6 +63,11 @@ const EDIT_FIELDS: Record<string, { key: string; label: string; hint?: string }[
   call_park: [
     { key: "name", label: "Park name" },
     { key: "extension", label: "Park extension", hint: "single number, plain digits" },
+    { key: "locationName", label: "Webex location" },
+  ],
+  auto_attendant: [
+    { key: "name", label: "Auto attendant name" },
+    { key: "extension", label: "Extension", hint: "plain digits — required" },
     { key: "locationName", label: "Webex location" },
   ],
 };
@@ -370,6 +376,11 @@ export function ReviewPage() {
                             )}
                             {type === "route_pattern" && <div className="dim small mono">{p.cucmPattern} → {p.dialPattern}</div>}
                             {type === "workspace" && <div className="dim small">{p.deviceModel ?? "phone"} · {p.deviceName}</div>}
+                            {type === "auto_attendant" && (p.keys?.length ?? 0) > 0 && (
+                              <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 420 }}>
+                                menu: {p.keys.map((k: any) => `${k.key} → ${k.description}`).join(" · ")}
+                              </div>
+                            )}
                           </>
                         )}
                       </td>

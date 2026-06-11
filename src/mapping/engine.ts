@@ -579,6 +579,87 @@ export function callPermissionsFor(level: CallPermissionLevel): { callType: stri
   }));
 }
 
+type SrcCallHandler = { id: string; object_id: string; name: string; extension: string | null; menu_json: string | null };
+type MenuTarget = { kind: "user" | "handler"; name: string; extension: string | null };
+
+/**
+ * Unity call handler → Webex auto attendant. Menu keys are translated where
+ * a clean equivalent exists; everything else is preserved as a note so the
+ * engineer designs the rest in Control Hub rather than losing it.
+ */
+export function buildAutoAttendantMapping(handler: SrcCallHandler, targets: Map<string, MenuTarget>) {
+  const notes: string[] = [];
+  let confidence: "green" | "amber" | "red" = "amber";
+
+  let menu: any[] = [];
+  try {
+    menu = JSON.parse(handler.menu_json ?? "[]");
+  } catch {
+    /* our own ingest */
+  }
+
+  const keys: { key: string; action: string; value?: string; description: string }[] = [];
+  const unmapped: string[] = [];
+  for (const entry of menu) {
+    const key = String(entry.TouchtoneKey ?? "");
+    const action = String(entry.Action ?? "0");
+    if (!key || action === "0") continue; // ignored keys
+    if (action === "1") {
+      keys.push({ key, action: "EXIT", description: "hang up" });
+    } else if (action === "6") {
+      keys.push({ key, action: "REPEAT_MENU", description: "repeat greeting" });
+    } else if (action === "7" && entry.TransferNumber) {
+      keys.push({ key, action: "TRANSFER_WITHOUT_PROMPT", value: String(entry.TransferNumber), description: `transfer to ${entry.TransferNumber}` });
+    } else if (action === "2" && entry.TargetHandlerObjectId) {
+      const target = targets.get(String(entry.TargetHandlerObjectId));
+      if (target?.extension) {
+        keys.push({
+          key,
+          action: "TRANSFER_WITHOUT_PROMPT",
+          value: target.extension,
+          description: `transfer to ${target.kind === "user" ? "user" : "handler"} ${target.name} (${target.extension})`,
+        });
+      } else {
+        unmapped.push(`${key} → ${target ? `${target.name} (no extension)` : `handler ${entry.TargetHandlerObjectId}`}`);
+      }
+    } else if (action === "2" && entry.TargetConversation) {
+      unmapped.push(`${key} → conversation ${entry.TargetConversation}`);
+    } else {
+      unmapped.push(`${key} → Unity action ${action}`);
+    }
+  }
+  if (unmapped.length > 0) {
+    notes.push(`Menu keys with no Webex equivalent (configure manually): ${unmapped.join("; ")}`);
+  }
+  if (keys.length === 0) {
+    notes.push("No menu keys translated — the auto attendant will be created with a repeat-menu key only");
+  }
+
+  let extension = handler.extension ?? null;
+  if (extension) {
+    const fixed = sanitizeExtension(extension);
+    if (!fixed.valid) {
+      confidence = "red";
+      notes.push(`Handler number "${extension}" is not a plain extension`);
+    }
+    extension = fixed.extension;
+  } else {
+    notes.push("Handler has no extension in Unity — assign one before pushing (auto attendants need a number or extension)");
+    confidence = "red";
+  }
+  notes.push("Greeting audio is not uploaded automatically for auto attendants in v1 — re-record or upload in Control Hub");
+
+  const payload = {
+    name: handler.name,
+    extension,
+    keys,
+    unmappedKeys: unmapped,
+    locationName: null as string | null,
+    cucmSite: null as string | null,
+  };
+  return { payload, confidence, notes };
+}
+
 /** Combine a site's E.164 prefix with an extension; null when the result isn't valid E.164. */
 export function e164FromExtension(prefix: string, extension: string): string | null {
   const p = prefix.trim().replace(/[\s().-]/g, "");
@@ -608,6 +689,7 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     ["route_pattern", "src_dialplan"],
     ["call_park", "src_dialplan"],
     ["phone", "src_phones"],
+    ["call_handler", "src_call_handlers"],
   ];
   for (const [srcType, table] of orphanCleanup) {
     await env.DB.prepare(
@@ -638,6 +720,11 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     await env.DB.prepare("SELECT id, name, partition_name, description FROM src_dialplan WHERE project_id = ? AND object_type = 'call_park'")
       .bind(projectId)
       .all<SrcRoutePattern>()
+  ).results;
+  const callHandlers = (
+    await env.DB.prepare("SELECT id, object_id, name, extension, menu_json FROM src_call_handlers WHERE project_id = ?")
+      .bind(projectId)
+      .all<SrcCallHandler>()
   ).results;
 
   // Site context: a user's site is the device pool (fallback: CUCM location)
@@ -820,6 +907,31 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     const { payload, confidence, notes } = buildRoutePatternMapping(rp);
     upsert("route_pattern", rp.id, "route_pattern", payload, confidence, notes);
   }
+  // Menu-key target resolution: handler object ids → users (primary handlers
+  // via mailbox CallHandlerObjectId) or other call handlers.
+  const menuTargets = new Map<string, MenuTarget>();
+  for (const h of callHandlers) {
+    menuTargets.set(h.object_id, { kind: "handler", name: h.name, extension: h.extension });
+  }
+  const vmBoxRaw = (
+    await env.DB.prepare("SELECT alias, extension, raw_json FROM src_vm_boxes WHERE project_id = ?")
+      .bind(projectId)
+      .all<{ alias: string; extension: string | null; raw_json: string }>()
+  ).results;
+  for (const box of vmBoxRaw) {
+    try {
+      const chId = JSON.parse(box.raw_json)?.CallHandlerObjectId;
+      if (chId) menuTargets.set(String(chId), { kind: "user", name: box.alias, extension: box.extension });
+    } catch {
+      /* our own JSON */
+    }
+  }
+  const defaultSite = mostCommon([...siteByUser.values()]);
+  for (const ch of callHandlers) {
+    const { payload, confidence, notes } = buildAutoAttendantMapping(ch, menuTargets);
+    upsert("call_handler", ch.id, "auto_attendant", { ...payload, cucmSite: defaultSite, locationName: locationFor(defaultSite) }, confidence, notes, 0);
+  }
+
   for (const cp of callParks) {
     const { payload, confidence, notes } = buildCallParkMapping(cp);
     // Park extensions are location-scoped; default to the most common site's location.

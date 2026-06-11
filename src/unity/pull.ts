@@ -126,6 +126,43 @@ export async function pullFromUnity(env: Env, projectId: string): Promise<{ snap
     );
     counts.vm_boxes = users.length;
 
+    // Call handlers (non-primary) with their menus — mapped to auto attendants.
+    try {
+      await env.DB.prepare(
+        `DELETE FROM src_call_handlers WHERE project_id = ? AND snapshot_id IN
+          (SELECT id FROM source_snapshots WHERE project_id = ? AND source = 'cupi')`,
+      )
+        .bind(projectId, projectId)
+        .run();
+      const handlers = await unity.listCallHandlers();
+      for (const h of handlers) {
+        let menu: any[] = [];
+        try {
+          menu = await unity.getMenuEntries(String(h.ObjectId));
+        } catch (e) {
+          warnings.push(`Call handler ${h.DisplayName}: menu entries unavailable (${e instanceof Error ? e.message : e})`);
+        }
+        await env.DB.prepare(
+          `INSERT INTO src_call_handlers (id, project_id, snapshot_id, object_id, name, extension, menu_json, raw_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+          .bind(
+            uuid(),
+            projectId,
+            snapshotId,
+            String(h.ObjectId),
+            String(h.DisplayName ?? h.ObjectId),
+            h.DtmfAccessId ? String(h.DtmfAccessId) : null,
+            JSON.stringify(menu),
+            JSON.stringify(h),
+          )
+          .run();
+      }
+      counts.call_handlers = handlers.length;
+    } catch (e) {
+      warnings.push(`Call handlers not pulled: ${e instanceof Error ? e.message : e}`);
+    }
+
     // Re-match any orphaned greeting files against the fresh mailbox list.
     const orphans = (
       await env.DB.prepare("SELECT id, filename FROM src_vm_greetings WHERE project_id = ? AND matched_alias IS NULL")

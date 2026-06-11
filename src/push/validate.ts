@@ -112,6 +112,19 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
         if (payload.voicemail) {
           notes.push(payload.greetingKey ? "Voicemail will be enabled with the matched Unity greeting" : "Voicemail will be enabled (no greeting file matched — default greeting)");
         }
+      } else if (item.target_type === "auto_attendant") {
+        checkLocation();
+        if (!payload.extension) {
+          worsen("red");
+          notes.push("No extension — auto attendants need a number; edit the mapping");
+        } else if (extensionsInUse.has(String(payload.extension))) {
+          worsen("amber");
+          notes.push(`Extension ${payload.extension} appears to be in use`);
+        }
+        if ((payload.unmappedKeys ?? []).length > 0) {
+          worsen("amber");
+          notes.push(`${payload.unmappedKeys.length} menu key(s) need manual configuration in Control Hub`);
+        }
       } else if (item.target_type === "call_park") {
         checkLocation();
         if (!payload.extension) {

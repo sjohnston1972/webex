@@ -29,7 +29,7 @@ type ItemRow = {
   target_payload: string;
 };
 
-const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern", "route_pattern", "call_park"];
+const GROUP_TYPES = ["hunt_group", "call_pickup", "translation_pattern", "route_pattern", "call_park", "auto_attendant"];
 
 export async function startPush(env: Env, projectId: string, batchId: string): Promise<{ queued: number }> {
   await env.DB.prepare("UPDATE batches SET status = 'pushing' WHERE id = ?").bind(batchId).run();
@@ -352,6 +352,41 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     await recordSuccess(env, item.id, result.id, { created: true, type: "call_pickup", locationId: loc.id });
     if (missing.length > 0) await appendError(env, item.id, `Created without unresolvable members: ${missing.join(", ")}`);
     if (dropped.length > 0) await appendError(env, item.id, `Created without ${dropped.length} member(s) not assignable to pickup (no calling licence): ${dropped.join(", ")}`);
+  } else if (item.target_type === "auto_attendant") {
+    if (!payload.extension) throw new Error("Auto attendant needs an extension — edit the mapping first");
+    const loc = await resolveLocation();
+    // Auto attendants require a business schedule at the location.
+    let scheduleName: string;
+    const schedules = (await client.listSchedules(loc.id)).filter((sc: any) => String(sc.type).toLowerCase() === "businesshours");
+    if (schedules.length > 0) {
+      scheduleName = schedules[0].name;
+    } else {
+      const created = (await client.createSchedule(loc.id, { type: "businessHours", name: "All Hours (CUCM migration)" })) as any;
+      scheduleName = created.name ?? "All Hours (CUCM migration)";
+    }
+    const keyConfigurations = (payload.keys ?? []).map((k: any) => ({
+      key: k.key,
+      action: k.action,
+      ...(k.value ? { value: k.value } : {}),
+    }));
+    if (keyConfigurations.length === 0) keyConfigurations.push({ key: "0", action: "REPEAT_MENU" });
+    const menu = { greeting: "DEFAULT", extensionEnabled: true, keyConfigurations };
+    const body = {
+      name: payload.name,
+      extension: payload.extension,
+      firstName: "Auto",
+      lastName: payload.name,
+      extensionDialing: "GROUP",
+      nameDialing: "FIRST_LAST",
+      businessSchedule: scheduleName,
+      businessHoursMenu: menu,
+      afterHoursMenu: menu,
+    };
+    const result = (await client.createAutoAttendant(loc.id, body)) as any;
+    await recordSuccess(env, item.id, result.id, { created: true, type: "auto_attendant", locationId: loc.id });
+    if ((payload.unmappedKeys ?? []).length > 0) {
+      await appendError(env, item.id, `Created without ${payload.unmappedKeys.length} untranslatable menu key(s): ${payload.unmappedKeys.join("; ")}`);
+    }
   } else if (item.target_type === "call_park") {
     if (!payload.extension) throw new Error("Call park range/pattern cannot push — edit the mapping to a single extension first");
     const loc = await resolveLocation();
@@ -433,6 +468,7 @@ async function rollbackItem(env: Env, item: ItemRow): Promise<void> {
     else if (info.type === "hunt_group") await client.deleteHuntGroup(info.locationId, item.webex_resource_id);
     else if (info.type === "call_pickup") await client.deleteCallPickup(info.locationId, item.webex_resource_id);
     else if (info.type === "call_park") await client.deleteCallParkExtension(info.locationId, item.webex_resource_id);
+    else if (info.type === "auto_attendant") await client.deleteAutoAttendant(info.locationId, item.webex_resource_id);
     else if (info.type === "translation_pattern") await client.deleteTranslationPattern(item.webex_resource_id);
     else if (info.type === "route_pattern") {
       // Remove only this pattern; the dial plan itself stays (other patterns may share it).

@@ -209,6 +209,61 @@ describe("hunt group agent details", () => {
   });
 });
 
+describe("buildAutoAttendantMapping", () => {
+  const targets = new Map<string, any>([
+    ["op-id", { kind: "handler", name: "Operator", extension: "0" }],
+    ["user-id", { kind: "user", name: "jdoe", extension: "1001" }],
+    ["noext-id", { kind: "handler", name: "Goodbye", extension: null }],
+  ]);
+  const handler = (menu: any[], ext: string | null = "5000") => ({
+    id: "ch1",
+    object_id: "ch1-obj",
+    name: "Opening Greeting",
+    extension: ext,
+    menu_json: JSON.stringify(menu),
+  });
+
+  it("translates transfer keys to handler and user extensions", async () => {
+    const { buildAutoAttendantMapping } = await import("../src/mapping/engine");
+    const { payload } = buildAutoAttendantMapping(
+      handler([
+        { TouchtoneKey: "0", Action: "2", TargetConversation: "PHTransfer", TargetHandlerObjectId: "op-id" },
+        { TouchtoneKey: "1", Action: "2", TargetConversation: "PHTransfer", TargetHandlerObjectId: "user-id" },
+        { TouchtoneKey: "2", Action: "7", TransferNumber: "6018" },
+        { TouchtoneKey: "9", Action: "1" },
+      ]),
+      targets,
+    );
+    expect(payload.keys).toEqual([
+      { key: "0", action: "TRANSFER_WITHOUT_PROMPT", value: "0", description: "transfer to handler Operator (0)" },
+      { key: "1", action: "TRANSFER_WITHOUT_PROMPT", value: "1001", description: "transfer to user jdoe (1001)" },
+      { key: "2", action: "TRANSFER_WITHOUT_PROMPT", value: "6018", description: "transfer to 6018" },
+      { key: "9", action: "EXIT", description: "hang up" },
+    ]);
+  });
+
+  it("reports untranslatable keys and ignores Action 0", async () => {
+    const { buildAutoAttendantMapping } = await import("../src/mapping/engine");
+    const { payload, notes } = buildAutoAttendantMapping(
+      handler([
+        { TouchtoneKey: "*", Action: "2", TargetConversation: "SubSignIn" },
+        { TouchtoneKey: "3", Action: "2", TargetConversation: "PHTransfer", TargetHandlerObjectId: "noext-id" },
+        { TouchtoneKey: "4", Action: "0" },
+      ]),
+      targets,
+    );
+    expect(payload.keys).toEqual([]);
+    expect(payload.unmappedKeys).toHaveLength(2);
+    expect(notes.join(" ")).toMatch(/no Webex equivalent/);
+  });
+
+  it("blocks handlers without an extension", async () => {
+    const { buildAutoAttendantMapping } = await import("../src/mapping/engine");
+    const { confidence } = buildAutoAttendantMapping(handler([], null), targets);
+    expect(confidence).toBe("red");
+  });
+});
+
 describe("e164FromExtension", () => {
   it("combines prefix and extension into E.164", async () => {
     const { e164FromExtension } = await import("../src/mapping/engine");
