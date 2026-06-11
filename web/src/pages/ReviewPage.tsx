@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, Mapping } from "../api";
 import { Alert, Card, Empty, Modal, Pill, Spinner } from "../components";
@@ -17,7 +17,7 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 // What each section is in CUCM and what it becomes in Webex.
-const TYPE_DESCRIPTIONS: Record<string, JSX.Element> = {
+const TYPE_DESCRIPTIONS: Record<string, ReactNode> = {
   person: (
     <>
       <strong>CUCM End Users</strong> (with their primary extension) become <strong>Webex Calling people</strong>: a Calling licence,

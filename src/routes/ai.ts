@@ -57,7 +57,7 @@ ${mapping.notes ?? "(none)"}`;
   let lastError = "";
   for (const model of MODELS) {
     try {
-      const result = (await c.env.AI.run(model as any, { messages, max_tokens: 900 })) as Record<string, unknown>;
+      const result = (await c.env.AI.run(model as any, { messages, max_tokens: 900 })) as unknown as Record<string, unknown>;
       const reply = extractReply(result);
       if (reply) return c.json({ reply, model });
       lastError = `model ${model} returned an empty/unrecognised response`;
