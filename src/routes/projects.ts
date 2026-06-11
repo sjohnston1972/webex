@@ -150,6 +150,16 @@ projects.get("/:id/issues", async (c) => {
             detail: `${callingDemand} ${scopeWord} people need Webex Calling, but only ${free} of ${calling.totalUnits} "${calling.name}" seats are free. Reduce scope or add licences before pushing.`,
           });
         }
+        // Structural capacity outlook: total source users vs total org seats,
+        // regardless of what's currently selected.
+        const totalPersons = parsed.filter((m) => m.target_type === "person").length;
+        if (totalPersons > calling.totalUnits) {
+          issues.push({
+            severity: callingDemand > free ? "red" : "amber",
+            title: "Capacity outlook: more CUCM users than org seats",
+            detail: `CUCM has ${totalPersons} end users mapped, but the Webex org has only ${calling.totalUnits} "${calling.name}" seats in total (${free} currently free). At most ${calling.totalUnits} people can be migrated with calling — plan additional licences or phase the migration.`,
+          });
+        }
       }
       const ws = licenses.find((l: any) => /webex calling.*workspaces/i.test(l.name));
       if (ws && ws.totalUnits !== undefined && workspaceDemand > ws.totalUnits - ws.consumedUnits) {

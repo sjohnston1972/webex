@@ -42,7 +42,9 @@ export function suggestedQuestion(m: Mapping): string {
   }
 }
 
-export function ChatModal({ projectId, mapping, onClose }: { projectId: string; mapping: Mapping; onClose: () => void }) {
+export type ChatTopic = { label: string; question: string; context: string };
+
+export function ChatModal({ projectId, mapping, topic, onClose }: { projectId: string; mapping?: Mapping; topic?: ChatTopic; onClose: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,7 +55,8 @@ export function ChatModal({ projectId, mapping, onClose }: { projectId: string; 
     setBusy(true);
     try {
       const r = await api.post<{ reply: string }>(`/api/projects/${projectId}/ai/chat`, {
-        mappingId: mapping.id,
+        mappingId: mapping?.id,
+        context: topic?.context,
         messages: history,
       });
       setMessages([...history, { role: "assistant", content: r.reply }]);
@@ -68,7 +71,8 @@ export function ChatModal({ projectId, mapping, onClose }: { projectId: string; 
   useEffect(() => {
     if (startedRef.current) return;
     startedRef.current = true;
-    const opening: ChatMessage[] = [{ role: "user", content: suggestedQuestion(mapping) }];
+    const question = topic ? topic.question : mapping ? suggestedQuestion(mapping) : "What should I look at here?";
+    const opening: ChatMessage[] = [{ role: "user", content: question }];
     setMessages(opening);
     ask(opening);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -87,15 +91,22 @@ export function ChatModal({ projectId, mapping, onClose }: { projectId: string; 
     ask(next);
   };
 
-  const p = JSON.parse(mapping.target_payload);
-  const label = mapping.target_type === "person" ? (p.email ?? p.displayName) : (p.name ?? p.matchingPattern ?? p.cucmPattern);
+  let contextBar: string;
+  if (topic) {
+    contextBar = topic.label;
+  } else if (mapping) {
+    const p = JSON.parse(mapping.target_payload);
+    const label = mapping.target_type === "person" ? (p.email ?? p.displayName) : (p.name ?? p.matchingPattern ?? p.cucmPattern);
+    contextBar = `${mapping.target_type.replace(/_/g, " ")} · ${label} · ${mapping.confidence === "red" ? "blocked" : mapping.confidence === "amber" ? "needs review" : "ready"}`;
+  } else {
+    contextBar = "general";
+  }
 
   return (
     <Modal title="Migration assistant" onClose={onClose} wide>
       <div className="chat-modal">
         <div className="chat-context">
-          {mapping.target_type.replace(/_/g, " ")} · <strong>{label}</strong> ·{" "}
-          {mapping.confidence === "red" ? "blocked" : mapping.confidence === "amber" ? "needs review" : "ready"}
+          <strong>{contextBar}</strong>
         </div>
         <div className="chat-log" ref={logRef}>
           {messages.map((m, i) => (

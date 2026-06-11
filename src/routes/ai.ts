@@ -28,7 +28,7 @@ Answering style:
 export const ai = new Hono<AppContext>();
 
 ai.post("/:id/ai/chat", async (c) => {
-  const body = await c.req.json<{ mappingId?: string; messages?: { role: "user" | "assistant"; content: string }[] }>();
+  const body = await c.req.json<{ mappingId?: string; context?: string; messages?: { role: "user" | "assistant"; content: string }[] }>();
   if (!Array.isArray(body.messages) || body.messages.length === 0) return c.json({ error: "messages required" }, 400);
   if (body.messages.length > 30) return c.json({ error: "conversation too long" }, 400);
 
@@ -47,6 +47,8 @@ ai.post("/:id/ai/chat", async (c) => {
 ${mapping.notes ?? "(none)"}`;
     }
   }
+
+  if (!context && body.context) context = `Topic under discussion (project readiness issue):\n${String(body.context).slice(0, 3000)}`;
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },

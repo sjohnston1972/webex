@@ -1,6 +1,7 @@
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 import { api } from "../api";
 import { Card, Empty, IngestCounts, Modal, Pill, Spinner } from "../components";
+import { ChatModal, ChatTopic } from "../ChatModal";
 import type { ProjectContext } from "../App";
 import { useEffect, useState } from "react";
 
@@ -210,6 +211,7 @@ export function OverviewPage() {
   const [busy, setBusy] = useState(false);
   const [tile, setTile] = useState<TileSpec | null>(null);
   const [issues, setIssues] = useState<{ severity: "red" | "amber" | "info"; title: string; detail: string }[] | null>(null);
+  const [chatTopic, setChatTopic] = useState<ChatTopic | null>(null);
 
   useEffect(() => {
     api
@@ -256,8 +258,23 @@ export function OverviewPage() {
             <tbody>
               {issues.map((iss, i) => (
                 <tr key={i}>
-                  <td style={{ width: 90 }}>
-                    <Pill tone={iss.severity === "info" ? "blue" : iss.severity}>{iss.severity === "red" ? "blocking" : iss.severity === "amber" ? "review" : "info"}</Pill>
+                  <td style={{ width: 150 }}>
+                    <span className="pill-row">
+                      <Pill tone={iss.severity === "info" ? "blue" : iss.severity}>{iss.severity === "red" ? "blocking" : iss.severity === "amber" ? "review" : "info"}</Pill>
+                      <button
+                        className="chat-pill"
+                        title="Ask the migration assistant about this issue"
+                        onClick={() =>
+                          setChatTopic({
+                            label: `readiness issue · ${iss.title}`,
+                            question: `Regarding this migration readiness issue: "${iss.title}" — ${iss.detail} What are my options to resolve or work around it?`,
+                            context: `${iss.title}: ${iss.detail}`,
+                          })
+                        }
+                      >
+                        ✦ chat
+                      </button>
+                    </span>
                   </td>
                   <td style={{ fontWeight: 600, whiteSpace: "nowrap" }}>{iss.title}</td>
                   <td className="notes">{iss.detail}</td>
@@ -412,6 +429,7 @@ export function OverviewPage() {
       </Card>
 
       {tile && <TileModal projectId={projectId!} spec={tile} onClose={() => setTile(null)} />}
+      {chatTopic && <ChatModal projectId={projectId!} topic={chatTopic} onClose={() => setChatTopic(null)} />}
 
       <Card title="Danger zone">
         {!confirmDelete ? (
