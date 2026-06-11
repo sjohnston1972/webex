@@ -176,6 +176,11 @@ describe("recheckMapping (after user edit)", () => {
     expect(recheckMapping("route_pattern", { dialPattern: "9@" }).confidence).toBe("red");
     expect(recheckMapping("route_pattern", { dialPattern: "9XXXXXXXXXX" }).confidence).toBe("amber");
   });
+  it("route pattern goes green once a route target is assigned", () => {
+    const r = recheckMapping("route_pattern", { dialPattern: "9XXXXXXXXXX", routeChoice: { type: "TRUNK", id: "t1", name: "LGW-London" } });
+    expect(r.confidence).toBe("green");
+    expect(r.notes.join(" ")).toMatch(/Routes via LGW-London/);
+  });
 });
 
 describe("translation pattern destination resolution", () => {

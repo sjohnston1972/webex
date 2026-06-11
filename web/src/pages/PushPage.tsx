@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext, useParams } from "react-router-dom";
 import { api, Batch, BatchItem } from "../api";
-import { Alert, Card, Empty, Pill, Spinner } from "../components";
+import { Alert, Card, Empty, Modal, Pill, Spinner } from "../components";
 import type { ProjectContext } from "../App";
 
 export function PushPage() {
@@ -10,14 +10,20 @@ export function PushPage() {
   const [active, setActive] = useState<string | null>(summary.batches[0]?.id ?? null);
   const [msg, setMsg] = useState<{ tone: "ok" | "error" | "info"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [naming, setNaming] = useState(false);
+  const [batchName, setBatchName] = useState("");
 
   const createBatch = async () => {
     setBusy(true);
     setMsg(null);
     try {
-      const r = await api.post<{ id: string; items: number }>(`/api/projects/${projectId}/batches`);
-      setMsg({ tone: "ok", text: `Batch created with ${r.items} selected item(s). Run the dry-run next.` });
+      const r = await api.post<{ id: string; name: string; items: number }>(`/api/projects/${projectId}/batches`, {
+        name: batchName.trim() || undefined,
+      });
+      setMsg({ tone: "ok", text: `Batch "${r.name}" created with ${r.items} selected item(s). Run the dry-run next.` });
       setActive(r.id);
+      setNaming(false);
+      setBatchName("");
       reload();
     } catch (err) {
       setMsg({ tone: "error", text: err instanceof Error ? err.message : String(err) });
@@ -34,12 +40,43 @@ export function PushPage() {
           <p className="page-desc">Batch up the selected mappings, dry-run them against Webex, then push. Every batch can be rolled back.</p>
         </div>
         <div className="grow" />
-        <button className="btn primary" onClick={createBatch} disabled={busy}>
-          {busy ? <Spinner /> : "+ New batch from selection"}
+        <button className="btn primary" onClick={() => setNaming(true)} disabled={busy}>
+          + New batch from selection
         </button>
       </div>
 
       {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
+
+      {naming && (
+        <Modal title="New batch" onClose={() => setNaming(false)}>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              createBatch();
+            }}
+          >
+            <div className="field">
+              <label>Batch name</label>
+              <input
+                value={batchName}
+                onChange={(e) => setBatchName(e.target.value)}
+                placeholder={`e.g. Pilot wave 1 — ${new Date().toLocaleDateString()}`}
+                autoFocus
+              />
+              <div className="hint">Created from the current selection on Review & select. Leave blank for an automatic timestamped name.</div>
+            </div>
+            <div className="toolbar">
+              <div className="grow" />
+              <button type="button" className="btn" onClick={() => setNaming(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn primary" disabled={busy}>
+                {busy ? <Spinner /> : "Create batch"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {summary.batches.length === 0 ? (
         <Card>

@@ -75,7 +75,12 @@ export function recheckMapping(targetType: string, payload: Record<string, any>)
     const fixed = sanitizePattern(String(payload.dialPattern ?? ""));
     if (!payload.dialPattern) blocked("No dial pattern");
     fixed.unsupported.forEach((c) => blocked(`Dial pattern contains unsupported "${c}"`));
-    review("Verify pattern; choose/confirm route target before pushing");
+    if (fixed.removed.length > 0) notes.push(`Pattern corrected (removed ${fixed.removed.join(" ")})`);
+    if (payload.routeChoice?.id) {
+      notes.push(`Routes via ${payload.routeChoice.name ?? payload.routeChoice.id} — pushed into dial plan "CUCM via ${payload.routeChoice.name ?? ""}"`);
+    } else {
+      review("Choose a route target (trunk or route group) before pushing");
+    }
   }
   if (["person", "workspace", "hunt_group", "call_pickup", "call_park", "auto_attendant"].includes(targetType) && !payload.locationName) {
     review(NO_LOCATION_NOTE);
@@ -914,8 +919,34 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     // Deselected by default: digit manipulation always needs engineer review.
     upsert("trans_pattern", tp.id, "translation_pattern", payload, confidence, notes, 0);
   }
+  // Route choices survive regeneration (captured before the upsert replaces payloads).
+  const savedRouteChoices = new Map<string, any>();
+  for (const row of (
+    await env.DB.prepare(
+      `SELECT src_id, json_extract(target_payload,'$.routeChoice') AS rc FROM mappings
+       WHERE project_id = ? AND target_type = 'route_pattern' AND json_extract(target_payload,'$.routeChoice') IS NOT NULL`,
+    )
+      .bind(projectId)
+      .all<{ src_id: string; rc: string }>()
+  ).results) {
+    try {
+      savedRouteChoices.set(row.src_id, JSON.parse(row.rc));
+    } catch {
+      /* our own JSON */
+    }
+  }
   for (const rp of routePatterns) {
-    const { payload, confidence, notes } = buildRoutePatternMapping(rp);
+    const built = buildRoutePatternMapping(rp);
+    let { confidence } = built;
+    const { payload, notes } = built;
+    const saved = savedRouteChoices.get(rp.id);
+    if (saved?.id) {
+      payload.routeChoice = saved;
+      const idx = notes.findIndex((n) => n.startsWith("Choose a route target"));
+      if (idx >= 0) notes.splice(idx, 1);
+      notes.push(`Routes via ${saved.name ?? saved.id}`);
+      if (confidence === "amber") confidence = "green";
+    }
     upsert("route_pattern", rp.id, "route_pattern", payload, confidence, notes);
   }
   // Menu-key target resolution: handler object ids → users (primary handlers

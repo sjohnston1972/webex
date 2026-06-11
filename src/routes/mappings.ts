@@ -158,7 +158,11 @@ mappings.post("/:id/mappings/bulk", async (c) => {
     for (const row of results) {
       const payload = JSON.parse(row.target_payload);
       payload.routeChoice = body.routeChoice;
-      await c.env.DB.prepare("UPDATE mappings SET target_payload = ? WHERE id = ?").bind(JSON.stringify(payload), row.id).run();
+      // A route target resolves the "review" state — re-check so the pill goes green.
+      const recheck = recheckMapping("route_pattern", payload);
+      await c.env.DB.prepare("UPDATE mappings SET target_payload = ?, confidence = ?, notes = ? WHERE id = ?")
+        .bind(JSON.stringify(payload), recheck.confidence, recheck.notes.join("\n") || null, row.id)
+        .run();
     }
     return c.json({ ok: true, updated: results.length });
   }
