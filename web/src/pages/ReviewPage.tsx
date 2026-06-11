@@ -16,6 +16,63 @@ const TYPE_LABELS: Record<string, string> = {
   auto_attendant: "Auto attendants (Unity call handlers — deselected by default, review menus)",
 };
 
+// What each section is in CUCM and what it becomes in Webex.
+const TYPE_DESCRIPTIONS: Record<string, JSX.Element> = {
+  person: (
+    <>
+      <strong>CUCM End Users</strong> (with their primary extension) become <strong>Webex Calling people</strong>: a Calling licence,
+      their number/extension at the chosen location, the selected call-permission class, and voicemail — with their real Unity greeting
+      where one was matched. Users without a number are created without calling for manual assignment.
+    </>
+  ),
+  workspace: (
+    <>
+      <strong>Owner-less CUCM phones</strong> (common-area devices) become <strong>Webex Workspaces</strong> with calling. The phone's
+      first line becomes the workspace number; additional lines are flagged for manual handling.
+    </>
+  ),
+  hunt_group: (
+    <>
+      <strong>CUCM Hunt Pilots</strong> (with their Hunt List and Line Groups flattened) become <strong>Webex Hunt Groups</strong>: the
+      pilot number becomes the hunt number, the distribution algorithm maps to the closest Webex policy (Top Down → Regular, Circular →
+      Circular, Longest Idle → Uniform, Broadcast → Simultaneous), and member DNs resolve to the people listed below.
+    </>
+  ),
+  call_pickup: (
+    <>
+      <strong>CUCM Call Pickup Groups</strong> become <strong>Webex Call Pickup</strong> at the location. Member lines resolve to people;
+      members without calling are dropped automatically at push with a note.
+    </>
+  ),
+  translation_pattern: (
+    <>
+      <strong>CUCM Translation Patterns</strong> (digit manipulation) become <strong>Webex translation patterns</strong> under Call
+      Routing (org-wide). The destination is checked against the pulled route plan — patterns whose target doesn't exist are blocked, and
+      Webex rejects <span className="mono">*+</span> anywhere and X wildcards in the destination. Review each one before selecting.
+    </>
+  ),
+  route_pattern: (
+    <>
+      <strong>CUCM Route Patterns</strong> (how calls leave to the PSTN) become <strong>dial patterns in a Webex dial plan</strong>{" "}
+      (premises PSTN). Pick a <strong>route target</strong> — a Local Gateway trunk or route group — with the "Route via" selector above,
+      then Apply. Locations using Cloud PSTN don't need these at all.
+    </>
+  ),
+  call_park: (
+    <>
+      <strong>CUCM Call Park numbers</strong> become <strong>Webex call park extensions</strong> at the location. Webex park extensions
+      are single numbers — CUCM ranges are blocked until you edit them down to one (add the rest in Control Hub).
+    </>
+  ),
+  auto_attendant: (
+    <>
+      <strong>Unity call handlers</strong> (IVR menus) become <strong>Webex Auto Attendants</strong>. Menu keys are translated where a
+      clean equivalent exists (transfers to users, handlers or numbers); anything else is preserved as a note for manual configuration.
+      Greeting audio must be re-recorded or uploaded in Control Hub.
+    </>
+  ),
+};
+
 type RouteTarget = { type: "TRUNK" | "ROUTE_GROUP"; id: string; name: string };
 
 // Cumulative outgoing-call permission classes (each includes the ones above it).
@@ -271,6 +328,7 @@ export function ReviewPage() {
                     <select
                       value={routeTarget}
                       onChange={(e) => setRouteTarget(e.target.value)}
+                      className={rows.some((r) => !JSON.parse(r.target_payload).routeChoice) && !routeTarget ? "pulse-attention" : ""}
                       style={{ padding: "4px 8px", border: "1px solid var(--border-strong)", borderRadius: 6, font: "inherit", fontSize: 12 }}
                     >
                       <option value="">Route via…</option>
@@ -295,6 +353,7 @@ export function ReviewPage() {
             }
             tight
           >
+            {TYPE_DESCRIPTIONS[type] && <div className="type-desc">{TYPE_DESCRIPTIONS[type]}</div>}
             <div className="scroll-y" style={{ maxHeight: 480 }}>
             <table className="data">
               <thead>
