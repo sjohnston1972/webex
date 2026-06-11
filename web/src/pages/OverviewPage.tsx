@@ -13,11 +13,11 @@ const personName = (row: any) => {
   const p = JSON.parse(row.target_payload);
   return row.target_type === "person" ? (p.email ?? p.displayName) : (p.name ?? p.matchingPattern ?? p.cucmPattern);
 };
-const payloadCol = (key: string) => (row: any) => JSON.parse(row.target_payload)[key] ?? "â€”";
+const payloadCol = (key: string) => (row: any) => JSON.parse(row.target_payload)[key] ?? "—";
 
 const ELIGIBLE_COLUMNS = [
   { key: "identity", label: "Identity", render: personName },
-  { key: "number", label: "Number / Ext", render: (r: any) => { const p = JSON.parse(r.target_payload); return p.phoneNumber ?? p.extension ?? p.dialPattern ?? "â€”"; } },
+  { key: "number", label: "Number / Ext", render: (r: any) => { const p = JSON.parse(r.target_payload); return p.phoneNumber ?? p.extension ?? p.dialPattern ?? "—"; } },
   { key: "location", label: "Location", render: payloadCol("locationName") },
   { key: "confidence", label: "Readiness", render: (r: any) => (r.confidence === "red" ? "blocked" : r.confidence === "amber" ? "review" : "ready") },
   { key: "selected", label: "Selected", render: (r: any) => (r.selected ? "yes" : "no") },
@@ -26,7 +26,7 @@ const ELIGIBLE_COLUMNS = [
 const TILE_SPECS: Record<string, TileSpec> = {
   users: { title: "End users", fetch: (id) => `/api/projects/${id}/objects/users`, columns: [
     { key: "userid", label: "User ID" },
-    { key: "name", label: "Name", render: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || "â€”" },
+    { key: "name", label: "Name", render: (r) => [r.first_name, r.last_name].filter(Boolean).join(" ") || "—" },
     { key: "email", label: "Email" },
     { key: "primary_extension", label: "Extension" },
   ] },
@@ -75,8 +75,8 @@ const TILE_SPECS: Record<string, TileSpec> = {
       try {
         const menu = JSON.parse(r.menu_json ?? "[]") as any[];
         const live = menu.filter((m) => String(m.Action ?? "0") !== "0");
-        return live.length ? live.map((m) => m.TouchtoneKey).join(", ") : "â€”";
-      } catch { return "â€”"; }
+        return live.length ? live.map((m) => m.TouchtoneKey).join(", ") : "—";
+      } catch { return "—"; }
     } },
   ] },
   trans_patterns: { title: "Translation patterns", fetch: (id) => `/api/projects/${id}/objects/trans_patterns`, columns: [
@@ -133,16 +133,16 @@ function TileModal({ projectId, spec, onClose }: { projectId: string; spec: Tile
               {rows.map((r, i) => (
                 <tr key={r.id ?? i}>
                   {spec.columns.map((c) => (
-                    <td key={c.key} className="small">{String((c.render ? c.render(r) : r[c.key]) ?? "â€”")}</td>
+                    <td key={c.key} className="small">{String((c.render ? c.render(r) : r[c.key]) ?? "—")}</td>
                   ))}
                   {spec.kind === "greetings" && (
                     <td>
                       <span style={{ display: "inline-flex", gap: 6 }}>
                         <button className="btn sm" onClick={() => setPlaying(r)} title="Play in browser">
-                          â–¶ Play
+                          ▶ Play
                         </button>
                         <a className="btn sm" href={`${audioUrl(r)}?download`} title="Download WAV">
-                          â¤“
+                          ⤓
                         </a>
                       </span>
                     </td>
@@ -157,15 +157,15 @@ function TileModal({ projectId, spec, onClose }: { projectId: string; spec: Tile
       {playing && (
         <div className="scrim" style={{ zIndex: 60 }} onClick={(e) => e.target === e.currentTarget && setPlaying(null)}>
           <div className="player-card">
-            <div className="player-glyph">â™ª</div>
+            <div className="player-glyph">♪</div>
             <div className="player-title">{playing.filename}</div>
             <div className="player-sub">
-              {playing.matched_alias ? `mailbox: ${playing.matched_alias}` : "no matched mailbox"} Â· Unity greeting
+              {playing.matched_alias ? `mailbox: ${playing.matched_alias}` : "no matched mailbox"} · Unity greeting
             </div>
             <audio controls autoPlay src={audioUrl(playing)} style={{ width: "100%", marginTop: 14 }} />
             <div className="toolbar" style={{ marginTop: 14 }}>
               <a className="btn sm" href={`${audioUrl(playing)}?download`}>
-                â¤“ Download
+                ⤓ Download
               </a>
               <div className="grow" />
               <button className="btn sm" onClick={() => setPlaying(null)}>
@@ -238,17 +238,17 @@ export function OverviewPage() {
     <>
       <div className="page-head">
         <h1 className="page-title">{summary.project.name}</h1>
-        <p className="page-desc">Created {new Date(summary.project.created_at + "Z").toLocaleString()} Â· ID <span className="mono">{summary.project.id}</span></p>
+        <p className="page-desc">Created {new Date(summary.project.created_at + "Z").toLocaleString()} · ID <span className="mono">{summary.project.id}</span></p>
       </div>
 
       <Card
         title="Attention"
-        sub={issues === null ? "checkingâ€¦" : issues.length === 0 ? "no issues found" : `${issues.length} item(s)`}
+        sub={issues === null ? "checking…" : issues.length === 0 ? "no issues found" : `${issues.length} item(s)`}
         tight
       >
         {issues === null ? (
           <div className="card-body">
-            <Spinner /> <span className="dim small">Checking licence capacity and readinessâ€¦</span>
+            <Spinner /> <span className="dim small">Checking licence capacity and readiness…</span>
           </div>
         ) : issues.length === 0 ? (
           <div className="card-body">
@@ -267,13 +267,13 @@ export function OverviewPage() {
                         title="Ask the migration assistant about this issue"
                         onClick={() =>
                           setChatTopic({
-                            label: `readiness issue Â· ${iss.title}`,
-                            question: `Regarding this migration readiness issue: "${iss.title}" â€” ${iss.detail} What are my options to resolve or work around it?`,
+                            label: `readiness issue · ${iss.title}`,
+                            question: `Regarding this migration readiness issue: "${iss.title}" — ${iss.detail} What are my options to resolve or work around it?`,
                             context: `${iss.title}: ${iss.detail}`,
                           })
                         }
                       >
-                        âœ¦ chat
+                        ✦ chat
                       </button>
                     </span>
                   </td>
@@ -308,13 +308,13 @@ export function OverviewPage() {
                 onClick={() => setTile(eligibleSpec(m.target_type, ELIGIBLE_LABELS[m.target_type] ?? m.target_type))}
               >
                 <div className="tile-value">{m.n}</div>
-                <div className="tile-label">{ELIGIBLE_LABELS[m.target_type] ?? m.target_type} Â· {m.selected ?? 0} selected</div>
+                <div className="tile-label">{ELIGIBLE_LABELS[m.target_type] ?? m.target_type} · {m.selected ?? 0} selected</div>
               </button>
             ))}
             {(summary.unattachedDns ?? 0) > 0 && (
               <button className="tile tile-click" style={{ boxShadow: "0 1px 2px rgba(32,41,47,0.05), 0 0 0 1px #ecc7c5" }} onClick={() => setTile(TILE_SPECS.unattached)}>
                 <div className="tile-value" style={{ color: "var(--red)" }}>{summary.unattachedDns}</div>
-                <div className="tile-label">Unattached DNs Â· no migration path</div>
+                <div className="tile-label">Unattached DNs · no migration path</div>
               </button>
             )}
           </div>
@@ -358,7 +358,7 @@ export function OverviewPage() {
       <Card title="Danger zone">
         {!confirmDelete ? (
           <button className="btn danger" onClick={() => setConfirmDelete(true)}>
-            Delete projectâ€¦
+            Delete project…
           </button>
         ) : (
           <div className="toolbar">

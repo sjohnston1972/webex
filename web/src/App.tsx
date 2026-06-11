@@ -56,45 +56,133 @@ function PipelinePanel({ projectId, pathname }: { projectId: string; pathname: s
   const selected = (summary.mappingsByType ?? []).reduce((a, m) => a + (m.selected ?? 0), 0);
   const latestBatch = summary.batches[0];
 
-  const Row = ({ label, dot, value }: { label: string; dot: string; value: string }) => (
+  const Row = ({ label, dot, value, pop }: { label: string; dot: string; value: string; pop?: { title: string; rows: [string, string][] } }) => (
     <div className="pipe-row">
       <span className="pipe-label">{label}</span>
       <span className="pipe-value">
-        <span title={value}>{value}</span>
+        <span>{value}</span>
         <span className={`pipe-dot ${dot}`} />
       </span>
+      {pop && (
+        <div className="pipe-pop">
+          <div className="pipe-pop-head">{pop.title}</div>
+          <div className="pipe-pop-body">
+            {pop.rows.map(([k, v], i) => (
+              <div className="pipe-pop-row" key={i}>
+                <span className="k">{k}</span>
+                <span className="v">{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
+
+  const countRows: [string, string][] = Object.entries(summary.counts)
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => [k.replace(/_/g, " "), String(n)]);
+  const byType: [string, string][] = (summary.mappingsByType ?? []).map((m) => [m.target_type.replace(/_/g, " "), `${m.selected ?? 0} / ${m.n}`]);
+  const lastIngest = summary.snapshots[0];
 
   return (
     <div className="pipeline">
       <div className="nav-section">Pipeline</div>
-      <Row label="Source" dot={total > 0 ? "green" : "grey"} value={total > 0 ? `${total} objects` : "none"} />
+      <Row
+        label="Source"
+        dot={total > 0 ? "green" : "grey"}
+        value={total > 0 ? `${total} objects` : "none"}
+        pop={{
+          title: "Source data",
+          rows: [
+            ...countRows,
+            ...(lastIngest ? ([["last ingest", new Date(lastIngest.created_at + "Z").toLocaleString()]] as [string, string][]) : []),
+          ],
+        }}
+      />
       <Row
         label="CUCM (AXL)"
         dot={summary.axl?.verified_at ? "green" : summary.axl ? "amber" : "grey"}
         value={summary.axl?.verified_at ? `CUCM ${summary.axl.cucm_version ?? ""}` : summary.axl ? "unverified" : "not linked"}
+        pop={
+          summary.axl
+            ? {
+                title: "CUCM via AXL",
+                rows: [
+                  ["endpoint", summary.axl.base_url],
+                  ["username", summary.axl.username],
+                  ["version", summary.axl.cucm_version ?? "—"],
+                  ["verified", summary.axl.verified_at ? new Date(summary.axl.verified_at).toLocaleString() : "not yet"],
+                ],
+              }
+            : { title: "CUCM via AXL", rows: [["status", "not configured — see Source"]] }
+        }
       />
       <Row
         label="Unity (CUPI)"
         dot={summary.unity?.verified_at ? "green" : summary.unity ? "amber" : "grey"}
         value={summary.unity?.verified_at ? `Unity ${summary.unity.unity_version ?? ""}` : summary.unity ? "unverified" : "not linked"}
+        pop={
+          summary.unity
+            ? {
+                title: "Unity via CUPI",
+                rows: [
+                  ["endpoint", summary.unity.base_url],
+                  ["version", summary.unity.unity_version ?? "—"],
+                  ["mailboxes", String(summary.counts.vm_boxes ?? 0)],
+                  ["greetings", String(summary.counts.vm_greetings ?? 0)],
+                  ["verified", summary.unity.verified_at ? new Date(summary.unity.verified_at).toLocaleString() : "not yet"],
+                ],
+              }
+            : { title: "Unity via CUPI", rows: [["status", "not configured — see Source"]] }
+        }
       />
       <Row
         label="Mappings"
         dot={mapTotals.red > 0 ? "red" : mapTotals.amber > 0 ? "amber" : mapTotals.green > 0 ? "green" : "grey"}
         value={mapTotals.green + mapTotals.amber + mapTotals.red > 0 ? `${mapTotals.green}✓ ${mapTotals.amber}! ${mapTotals.red}✗` : "none"}
+        pop={{
+          title: "Mapping readiness",
+          rows: [
+            ["ready", String(mapTotals.green)],
+            ["needs review", String(mapTotals.amber)],
+            ["blocked", String(mapTotals.red)],
+          ],
+        }}
       />
-      <Row label="Selected" dot={selected > 0 ? "blue" : "grey"} value={String(selected)} />
+      <Row
+        label="Selected"
+        dot={selected > 0 ? "blue" : "grey"}
+        value={String(selected)}
+        pop={{ title: "Selected for migration (by type)", rows: byType.length ? byType : [["status", "nothing mapped yet"]] }}
+      />
       <Row
         label="Webex"
         dot={summary.webex ? "green" : "grey"}
         value={summary.webex ? (summary.webex.org_name && !summary.webex.org_name.startsWith("Y2lzY29zcGFyaz") ? summary.webex.org_name : "connected") : "not linked"}
+        pop={
+          summary.webex
+            ? {
+                title: "Webex organisation",
+                rows: [
+                  ["org", summary.webex.org_name && !summary.webex.org_name.startsWith("Y2lzY29zcGFyaz") ? summary.webex.org_name : "connected"],
+                  ["token expires", new Date(summary.webex.expires_at).toLocaleString()],
+                  ["connected", new Date(summary.webex.updated_at + "Z").toLocaleString()],
+                ],
+              }
+            : { title: "Webex organisation", rows: [["status", "not connected — see Webex stage"]] }
+        }
       />
       <Row
         label="Last batch"
         dot={latestBatch ? (latestBatch.status === "pushed" ? "green" : latestBatch.status === "failed" ? "red" : latestBatch.status.includes("roll") ? "grey" : "blue") : "grey"}
         value={latestBatch ? latestBatch.status.replace(/_/g, " ") : "none"}
+        pop={{
+          title: "Recent batches",
+          rows: summary.batches.length
+            ? summary.batches.slice(0, 5).map((b): [string, string] => [b.name, b.status.replace(/_/g, " ")])
+            : [["status", "no batches yet"]],
+        }}
       />
     </div>
   );
