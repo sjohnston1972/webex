@@ -781,7 +781,8 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   }
 
   const stmts: D1PreparedStatement[] = [];
-  const upsert = (srcType: string, srcId: string, targetType: string, payload: unknown, confidence: string, notes: string[], selectedDefault = 1) => {
+  // Everything starts deselected — migration scope is an explicit opt-in.
+  const upsert = (srcType: string, srcId: string, targetType: string, payload: unknown, confidence: string, notes: string[], selectedDefault = 0) => {
     stmts.push(
       env.DB.prepare(
         `INSERT INTO mappings (id, project_id, src_type, src_id, target_type, target_payload, status, selected, confidence, notes)
