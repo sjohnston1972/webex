@@ -173,6 +173,42 @@ describe("recheckMapping (after user edit)", () => {
   });
 });
 
+describe("translation pattern destination resolution", () => {
+  const tpRow = { id: "t1", pattern: "8XXX", partition_name: null, description: null, called_party_mask: "6018", prefix_digits: null };
+
+  it("blocks when the destination does not exist in the route plan", () => {
+    const { confidence, notes } = buildTranslationPatternMapping(tpRow, new Set(), { pattern: "6018", exists: false, entries: [] });
+    expect(confidence).toBe("red");
+    expect(notes.join(" ")).toMatch(/does not exist anywhere in the CUCM route plan/);
+  });
+
+  it("describes type, partition and carrying device when the destination exists", () => {
+    const { confidence, notes, payload } = buildTranslationPatternMapping(tpRow, new Set(), {
+      pattern: "6018",
+      exists: true,
+      entries: [{ type: "directory_number", partition: "PT-dCloud" }],
+      device: { name: "SEP001122334455", model: "Cisco 8845", ownerName: "John Doe" },
+    });
+    expect(confidence).toBe("amber");
+    const text = notes.join(" ");
+    expect(text).toMatch(/directory number in partition PT-dCloud/);
+    expect(text).toMatch(/SEP001122334455 \(Cisco 8845, John Doe\)/);
+    expect((payload as any).destination.exists).toBe(true);
+  });
+});
+
+describe("hunt group agent details", () => {
+  it("includes agent name and extension alongside email", () => {
+    const usersByExt = new Map([["1001", user() as any]]);
+    const { payload } = buildHuntGroupMapping(
+      { id: "h1", pattern: "2000", description: "Support", algorithm: "Circular", raw_json: "{}" },
+      ["1001"],
+      usersByExt,
+    );
+    expect((payload as any).agentDetails).toEqual([{ email: "jdoe@example.com", name: "John Doe", extension: "1001" }]);
+  });
+});
+
 describe("buildCallParkMapping", () => {
   it("maps a literal park number", async () => {
     const { buildCallParkMapping } = await import("../src/mapping/engine");

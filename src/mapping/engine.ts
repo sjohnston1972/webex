@@ -144,12 +144,24 @@ type SrcTransPattern = {
   prefix_digits: string | null;
 };
 
+/** What a translation pattern's destination resolves to in the CUCM route plan. */
+export type DestinationInfo = {
+  pattern: string;
+  exists: boolean;
+  entries: { type: string; partition: string | null }[];
+  device?: { name: string; model: string | null; ownerName: string | null } | null;
+};
+
 /**
  * CUCM translation pattern → Webex translation pattern (Call Routing).
  * Digit-manipulation semantics never map 1:1, so these are always flagged
- * for engineer review and default to deselected.
+ * for engineer review and default to deselected. When destination info is
+ * provided (resolved against the pulled route plan), a non-existent
+ * destination blocks the mapping and an existing one is described in detail
+ * (type, partition, carrying device) so the engineer doesn't have to
+ * correlate manually.
  */
-export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensions: Set<string>) {
+export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensions: Set<string>, destination?: DestinationInfo | null) {
   const notes: string[] = [];
   let confidence: "green" | "amber" | "red" = "amber";
 
@@ -188,6 +200,22 @@ export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensi
     notes.push("No transformation mask or prefix on the CUCM pattern — review its purpose; likely dial-plan routing, which stays manual in v1");
   }
 
+  if (mask && destination) {
+    if (!destination.exists) {
+      confidence = "red";
+      notes.push(`Destination ${destination.pattern} does not exist anywhere in the CUCM route plan — verify the target before migrating this pattern`);
+    } else {
+      const kinds = destination.entries
+        .map((e) => `${e.type.replace(/_/g, " ")}${e.partition ? ` in partition ${e.partition}` : ""}`)
+        .join("; ");
+      let detail = `Destination ${destination.pattern}: ${kinds || "found in route plan"}`;
+      if (destination.device) {
+        detail += ` — on device ${destination.device.name}${destination.device.model ? ` (${destination.device.model}${destination.device.ownerName ? `, ${destination.device.ownerName}` : ""})` : ""}`;
+      }
+      notes.push(detail);
+    }
+  }
+
   const payload = {
     name: tp.description?.trim() || `TP ${tp.pattern}`,
     matchingPattern: matching.pattern,
@@ -195,6 +223,7 @@ export function buildTranslationPatternMapping(tp: SrcTransPattern, knownExtensi
     replacementPattern,
     cucmPartition: tp.partition_name,
     cucmPrefixDigits: prefix,
+    destination: destination ?? null,
   };
   return { payload, confidence, notes };
 }
@@ -271,11 +300,16 @@ export function buildHuntGroupMapping(
   }
 
   const agentEmails: string[] = [];
+  const agentDetails: { email: string; name: string; extension: string }[] = [];
   const unresolved: string[] = [];
   for (const dn of memberDns) {
     const user = usersByExtension.get(dn);
-    if (user?.email) agentEmails.push(user.email);
-    else unresolved.push(dn);
+    if (user?.email) {
+      agentEmails.push(user.email);
+      agentDetails.push({ email: user.email, name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.userid, extension: dn });
+    } else {
+      unresolved.push(dn);
+    }
   }
   if (unresolved.length > 0) {
     confidence = "amber";
@@ -298,6 +332,7 @@ export function buildHuntGroupMapping(
     extension: fixed.extension,
     policy,
     agentEmails,
+    agentDetails,
     unresolvedMembers: unresolved,
     locationName: null as string | null,
   };
@@ -315,11 +350,16 @@ export function buildPickupMapping(group: SrcPickup, usersByExtension: Map<strin
   }
 
   const agentEmails: string[] = [];
+  const agentDetails: { email: string; name: string; extension: string }[] = [];
   const unresolved: string[] = [];
   for (const dn of memberDns) {
     const user = usersByExtension.get(dn);
-    if (user?.email) agentEmails.push(user.email);
-    else unresolved.push(dn);
+    if (user?.email) {
+      agentEmails.push(user.email);
+      agentDetails.push({ email: user.email, name: [user.first_name, user.last_name].filter(Boolean).join(" ") || user.userid, extension: dn });
+    } else {
+      unresolved.push(dn);
+    }
   }
   if (unresolved.length > 0) {
     confidence = "amber";
@@ -333,6 +373,7 @@ export function buildPickupMapping(group: SrcPickup, usersByExtension: Map<strin
   const payload = {
     name: group.name,
     agentEmails,
+    agentDetails,
     unresolvedMembers: unresolved,
     locationName: null as string | null,
   };
@@ -635,26 +676,30 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
   // The site of a group is the most common site among its resolved members.
   const memberSites = (dns: string[]) => mostCommon(dns.map((dn) => siteOf(usersByExtension.get(dn)?.userid)));
 
-  // Shared lines: when several users carry the same primary extension, only
-  // the first can own the number in Webex — the rest are created numberless.
-  const claimedExtensions = new Set<string>();
+  // Shared lines are kept on every sharer (Webex supports shared line
+  // appearances) — annotate so the engineer knows only one person can be the
+  // number's primary owner; the push falls back to numberless for the rest.
+  const sharers = new Map<string, string[]>();
+  for (const user of users) {
+    const n = user.primary_extension?.trim();
+    if (!n) continue;
+    if (!sharers.has(n)) sharers.set(n, []);
+    sharers.get(n)!.push(user.userid);
+  }
   for (const user of users) {
     const built = buildPersonMapping(user, vmBoxes);
     let { confidence } = built;
     const { payload, notes } = built;
     const number = payload.phoneNumber ?? payload.extension;
-    if (number) {
-      if (claimedExtensions.has(String(number))) {
-        notes.push(`Shared line: ${number} is already assigned to another migrating user — this person will be created without a number (assign manually)`);
-        payload.extension = null;
-        payload.phoneNumber = null;
-        if (confidence === "green") confidence = "amber";
-      } else {
-        claimedExtensions.add(String(number));
-      }
+    const sharedWith = number ? (sharers.get(user.primary_extension?.trim() ?? "") ?? []).filter((u) => u !== user.userid) : [];
+    if (sharedWith.length > 0) {
+      notes.push(
+        `Shared line: ${number} is also the primary extension of ${sharedWith.join(", ")} — Webex allows one primary owner; the others are created without the number, then configure shared line appearances on their devices in Control Hub`,
+      );
+      if (confidence === "green") confidence = "amber";
     }
     const site = siteOf(user.userid);
-    upsert("user", user.id, "person", { ...payload, cucmSite: site, locationName: locationFor(site) }, confidence, notes);
+    upsert("user", user.id, "person", { ...payload, cucmSite: site, locationName: locationFor(site), sharedLineWith: sharedWith }, confidence, notes);
   }
   for (const pilot of pilots) {
     const memberDns = membersByPilot.get(pilot.pattern) ?? [];
@@ -673,8 +718,48 @@ export async function generateMappings(env: Env, projectId: string): Promise<{ g
     const site = memberSites(memberDns);
     upsert("pickup_group", group.id, "call_pickup", { ...payload, cucmSite: site, locationName: locationFor(site) }, confidence, notes);
   }
+  // Resolve TP destinations against the full route plan: what kind of object
+  // is the target, in which partition, and which device carries it.
+  const dialplanByPattern = new Map<string, { type: string; partition: string | null }[]>();
+  for (const row of (
+    await env.DB.prepare(
+      `SELECT name, object_type, partition_name FROM src_dialplan WHERE project_id = ?
+       AND object_type NOT IN ('route_partition','css','route_list','route_group','sip_trunk')`,
+    )
+      .bind(projectId)
+      .all<{ name: string; object_type: string; partition_name: string | null }>()
+  ).results) {
+    if (!dialplanByPattern.has(row.name)) dialplanByPattern.set(row.name, []);
+    dialplanByPattern.get(row.name)!.push({ type: row.object_type, partition: row.partition_name });
+  }
+  const usersById = new Map(users.map((u) => [u.userid.toLowerCase(), u]));
+  const deviceByLine = new Map<string, { name: string; model: string | null; ownerName: string | null }>();
+  for (const ph of phones) {
+    try {
+      for (const dn of JSON.parse(ph.lines_json ?? "[]") as string[]) {
+        if (deviceByLine.has(dn)) continue;
+        const owner = ph.owner_userid ? usersById.get(ph.owner_userid.toLowerCase()) : null;
+        deviceByLine.set(dn, {
+          name: ph.device_name,
+          model: ph.model,
+          ownerName: owner ? [owner.first_name, owner.last_name].filter(Boolean).join(" ") || owner.userid : (ph.owner_userid ?? null),
+        });
+      }
+    } catch {
+      /* our own JSON */
+    }
+  }
+  const resolveDestination = (mask: string | null): DestinationInfo | null => {
+    const m = mask?.trim();
+    if (!m || /[Xx\[\]!*#?]/.test(m)) return null; // wildcard masks resolve per-call
+    const clean = m.replace(/[.\\/\s]/g, "");
+    const entries = dialplanByPattern.get(clean) ?? dialplanByPattern.get(m) ?? [];
+    const device = deviceByLine.get(clean) ?? deviceByLine.get(m) ?? null;
+    return { pattern: clean, exists: entries.length > 0 || !!device, entries, device };
+  };
+
   for (const tp of transPatterns) {
-    const { payload, confidence, notes } = buildTranslationPatternMapping(tp, knownExtensions);
+    const { payload, confidence, notes } = buildTranslationPatternMapping(tp, knownExtensions, resolveDestination(tp.called_party_mask));
     // Deselected by default: digit manipulation always needs engineer review.
     upsert("trans_pattern", tp.id, "translation_pattern", payload, confidence, notes, 0);
   }

@@ -298,8 +298,10 @@ export function ReviewPage() {
                               <>
                                 <div className="dim small">policy: {p.policy}</div>
                                 {(p.agentEmails?.length ?? 0) > 0 && (
-                                  <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 380 }}>
-                                    agents: {p.agentEmails.join(", ")}
+                                  <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 420 }}>
+                                    agents: {p.agentDetails?.length
+                                      ? p.agentDetails.map((a: any) => `${a.name} (${a.extension}) ${a.email}`).join(" · ")
+                                      : p.agentEmails.join(", ")}
                                   </div>
                                 )}
                                 {(p.unresolvedMembers?.length ?? 0) > 0 && (
@@ -310,8 +312,10 @@ export function ReviewPage() {
                             {type === "call_pickup" && (
                               <>
                                 {(p.agentEmails?.length ?? 0) > 0 ? (
-                                  <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 380 }}>
-                                    members: {p.agentEmails.join(", ")}
+                                  <div className="small" style={{ color: "var(--ink-soft)", maxWidth: 420 }}>
+                                    members: {p.agentDetails?.length
+                                      ? p.agentDetails.map((a: any) => `${a.name} (${a.extension}) ${a.email}`).join(" · ")
+                                      : p.agentEmails.join(", ")}
                                   </div>
                                 ) : (
                                   <div className="dim small">no resolved members</div>
@@ -321,7 +325,22 @@ export function ReviewPage() {
                                 )}
                               </>
                             )}
-                            {type === "translation_pattern" && <div className="dim small mono">{p.matchingPattern} → {p.replacementPattern ?? "?"}</div>}
+                            {type === "translation_pattern" && (
+                              <>
+                                <div className="dim small mono">{p.matchingPattern} → {p.replacementPattern ?? "?"}</div>
+                                {p.destination && (
+                                  p.destination.exists ? (
+                                    <div className="small" style={{ color: "var(--ink-soft)" }}>
+                                      dest {p.destination.pattern}:{" "}
+                                      {(p.destination.entries ?? []).map((e: any) => `${String(e.type).replace(/_/g, " ")}${e.partition ? ` · ${e.partition}` : ""}`).join("; ")}
+                                      {p.destination.device && ` — ${p.destination.device.name}${p.destination.device.model ? ` (${p.destination.device.model}${p.destination.device.ownerName ? `, ${p.destination.device.ownerName}` : ""})` : ""}`}
+                                    </div>
+                                  ) : (
+                                    <div className="small" style={{ color: "var(--red)" }}>dest {p.destination.pattern}: not found in CUCM route plan</div>
+                                  )
+                                )}
+                              </>
+                            )}
                             {type === "route_pattern" && <div className="dim small mono">{p.cucmPattern} → {p.dialPattern}</div>}
                             {type === "workspace" && <div className="dim small">{p.deviceModel ?? "phone"} · {p.deviceName}</div>}
                           </>
