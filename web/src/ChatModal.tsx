@@ -44,7 +44,7 @@ export function suggestedQuestion(m: Mapping): string {
 
 export type ChatTopic = { label: string; question: string; context: string };
 
-export function ChatModal({ projectId, mapping, topic, onClose }: { projectId: string; mapping?: Mapping; topic?: ChatTopic; onClose: () => void }) {
+export function ChatModal({ projectId, mapping, topic, onClose, onAction }: { projectId: string; mapping?: Mapping; topic?: ChatTopic; onClose: () => void; onAction?: () => void }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,12 +54,13 @@ export function ChatModal({ projectId, mapping, topic, onClose }: { projectId: s
   const ask = async (history: ChatMessage[]) => {
     setBusy(true);
     try {
-      const r = await api.post<{ reply: string }>(`/api/projects/${projectId}/ai/chat`, {
+      const r = await api.post<{ reply: string; actionApplied?: boolean }>(`/api/projects/${projectId}/ai/chat`, {
         mappingId: mapping?.id,
         context: topic?.context,
         messages: history,
       });
       setMessages([...history, { role: "assistant", content: r.reply }]);
+      if (r.actionApplied) onAction?.();
     } catch (e) {
       setMessages([...history, { role: "assistant", content: `Sorry — the assistant is unavailable: ${e instanceof Error ? e.message : e}` }]);
     } finally {

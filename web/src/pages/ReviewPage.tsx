@@ -533,7 +533,7 @@ export function ReviewPage() {
         ))
       )}
 
-      {chatWith && <ChatModal projectId={projectId!} mapping={chatWith} onClose={() => setChatWith(null)} />}
+      {chatWith && <ChatModal projectId={projectId!} mapping={chatWith} onClose={() => setChatWith(null)} onAction={load} />}
 
       {editing && (
         <EditMappingModal

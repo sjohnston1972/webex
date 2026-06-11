@@ -205,7 +205,7 @@ const ELIGIBLE_LABELS: Record<string, string> = {
 };
 
 export function OverviewPage() {
-  const { summary } = useOutletContext<ProjectContext>();
+  const { summary, reload } = useOutletContext<ProjectContext>();
   const { projectId } = useParams();
   const navigate = useNavigate();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -430,7 +430,7 @@ export function OverviewPage() {
       </Card>
 
       {tile && <TileModal projectId={projectId!} spec={tile} onClose={() => setTile(null)} />}
-      {chatTopic && <ChatModal projectId={projectId!} topic={chatTopic} onClose={() => setChatTopic(null)} />}
+      {chatTopic && <ChatModal projectId={projectId!} topic={chatTopic} onClose={() => setChatTopic(null)} onAction={reload} />}
 
       <Card title="Danger zone">
         {!confirmDelete ? (

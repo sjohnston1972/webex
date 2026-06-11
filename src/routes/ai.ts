@@ -1,33 +1,49 @@
 import { Hono } from "hono";
-import type { AppContext } from "../env";
+import type { AppContext, Env } from "../env";
+import { CALL_PERMISSION_LEVELS, generateMappings, NO_LOCATION_NOTE } from "../mapping/engine";
+import { WebexClient } from "../webex/client";
 
 // Best-first model chain: gpt-oss reasons better; llama is the reliable fallback.
 const MODELS = ["@cf/openai/gpt-oss-120b", "@cf/meta/llama-3.3-70b-instruct-fp8-fast"];
 
 const SYSTEM_PROMPT = `You are the migration assistant inside "webexmigrate", a tool that migrates Cisco CUCM / Unity Connection telephony configuration to Webex Calling.
-You are shown one migration item (a mapping from a CUCM object to a Webex object) including its readiness state and the tool's deterministic notes.
+You are shown one migration item or readiness issue, including the tool's deterministic notes.
 
 Hard facts about Webex Calling you must respect:
-- Translation patterns (Call Routing): "*+" is rejected anywhere; the destination (replacement) pattern cannot contain X wildcards — it must be literal digits (E.164 or an extension). Matching patterns may use digits, X, [] ranges, ! and +. CUCM "prefix digits" instructions have no direct equivalent.
-- Dial plans (premises PSTN) route dial patterns to a trunk (Local Gateway) or route group. There is no CUCM-style pre-dot digit stripping. Locations on Cloud Connected PSTN or Cisco Calling Plans don't need outbound route patterns at all.
-- People need an email; numbers must already exist in the location's inventory; locations must pre-exist; one person owns a number (shared lines = shared line appearances configured on devices).
+- Translation patterns (Call Routing): "*+" is rejected anywhere; the destination (replacement) pattern cannot contain X wildcards — it must be literal digits. Matching patterns may use digits, X, [] ranges, ! and +. CUCM "prefix digits" instructions have no direct equivalent.
+- Dial plans (premises PSTN) route dial patterns to a trunk (Local Gateway) or route group. Locations on Cloud PSTN don't need outbound route patterns.
+- People need an email; numbers must already exist in the location's inventory; locations must pre-exist; one person owns a number (shared lines = shared line appearances on devices).
 
 Webex features you may recommend — know what they are and where they live in Control Hub:
-- **Virtual extension**: maps an internal extension (or extension range) to an EXTERNAL PSTN number, so users dial a short extension and Webex routes the call to the outside number. Ideal replacement for CUCM translation patterns that aliased an extension to an off-net destination. Control Hub: Calling → Service Settings (org-level) or per-location → Virtual Extensions; also available via API. You provide the extension, the E.164 external number, and a display name.
-- **Auto attendant**: IVR menu with business/after-hours menus and key actions (transfer, mailbox, repeat). Control Hub: Calling → Features → Auto Attendant.
-- **Hunt group / Call queue**: distribute calls to agents (queue adds queuing/announcements). Calling → Features.
-- **Call park extension / group**, **Call pickup**: Calling → Features.
-- **Outgoing calling permissions**: per-person classes (internal / toll-free / national / international). People → Calling → Outgoing call permissions.
-- **Number inventory**: Calling → Numbers — numbers must be added (PSTN order or LGW range) before they can be assigned.
+- **Virtual extension**: maps an internal extension (or range) to an EXTERNAL PSTN number. Control Hub: Calling → Service Settings / per-location → Virtual Extensions.
+- **Auto attendant** (IVR menus), **Hunt group / Call queue**, **Call park**, **Call pickup**: Calling → Features.
+- **Locations**: Calling → Locations (each holds its number inventory and calling context).
+- **Outgoing calling permissions**: per-person classes (internal / toll-free / national / international).
+- **Number inventory**: Calling → Numbers.
+
+You can APPLY simple fixes yourself in this tool. Available actions (server-enforced allowlist — nothing else exists):
+- set_location_for_unset {"locationName": "<existing location>"} — assign that location to every mapping that currently has none
+- set_location_all {"locationName": "<existing location>"} — set the location on ALL mappings (fallback location)
+- regenerate_mappings {} — re-run mapping generation (after site mappings / prefixes change)
+- select_all {"targetType": "<optional type>"} / deselect_all {"targetType": "<optional type>"} — migration scope
+- set_voicemail_all {"enabled": true|false} — voicemail provisioning flag on every person
+- set_call_permission_all {"level": "internal"|"toll_free"|"national"|"international"} — outgoing call class on every person
+
+Action rules:
+- Act ONLY when the user clearly asks you to fix / apply / do it. Otherwise just advise.
+- Choose locationName from the "Org locations" list in your context. If the right choice is ambiguous, ask ONE short question instead of acting.
+- To act, end your reply with exactly one line (nothing after it):
+ACTION: {"name":"<action>","args":{...}}
+- One action per reply. You cannot push, rollback or delete — those stay human-driven on the Push page.
 
 Answering style:
-- For the FIRST question about an item: one-sentence diagnosis, then 2-4 concrete options as bullets, then a one-line recommendation. Under 220 words.
-- For FOLLOW-UP questions: answer the actual question directly and specifically. If the user asks about a feature you mentioned (e.g. "virtual extension?"), define it, explain why it fits this item, and give the Control Hub steps to configure it for this item's specific numbers. Do NOT repeat the option list or the recommendation format.
-- Use the item's actual numbers/patterns in your answers. No preamble, no apologies.`;
+- First question on an item: one-sentence diagnosis, 2-4 bullet options, one-line recommendation. Under 220 words.
+- Follow-ups: answer the actual question directly and specifically, using the item's real numbers/patterns. Define any feature you name. No preamble.`;
 
 export const ai = new Hono<AppContext>();
 
 ai.post("/:id/ai/chat", async (c) => {
+  const projectId = c.req.param("id");
   const body = await c.req.json<{ mappingId?: string; context?: string; messages?: { role: "user" | "assistant"; content: string }[] }>();
   if (!Array.isArray(body.messages) || body.messages.length === 0) return c.json({ error: "messages required" }, 400);
   if (body.messages.length > 30) return c.json({ error: "conversation too long" }, 400);
@@ -35,7 +51,7 @@ ai.post("/:id/ai/chat", async (c) => {
   let context = "";
   if (body.mappingId) {
     const mapping = await c.env.DB.prepare("SELECT target_type, target_payload, confidence, status, notes FROM mappings WHERE id = ? AND project_id = ?")
-      .bind(body.mappingId, c.req.param("id"))
+      .bind(body.mappingId, projectId)
       .first<{ target_type: string; target_payload: string; confidence: string; status: string; notes: string | null }>();
     if (mapping) {
       context = `Migration item under discussion:
@@ -47,18 +63,38 @@ ai.post("/:id/ai/chat", async (c) => {
 ${mapping.notes ?? "(none)"}`;
     }
   }
-
   if (!context && body.context) context = `Topic under discussion (project readiness issue):\n${String(body.context).slice(0, 3000)}`;
+
+  // Live project facts so actions can be chosen sensibly.
+  const stats = await c.env.DB.prepare(
+    `SELECT
+       (SELECT COUNT(*) FROM mappings WHERE project_id = ?1 AND json_extract(target_payload,'$.locationName') IS NULL
+          AND target_type IN ('person','workspace','hunt_group','call_pickup','call_park','auto_attendant')) AS unset_locations,
+       (SELECT COUNT(*) FROM mappings WHERE project_id = ?1 AND selected = 1) AS selected_count,
+       (SELECT COUNT(*) FROM mappings WHERE project_id = ?1) AS total_mappings`,
+  )
+    .bind(projectId)
+    .first<{ unset_locations: number; selected_count: number; total_mappings: number }>();
+  let locationNames: string[] = [];
+  try {
+    const client = await WebexClient.forProject(c.env, projectId);
+    locationNames = (await client.listLocations()).map((l: any) => String(l.name));
+  } catch {
+    /* webex not connected — actions needing locations will be refused */
+  }
+  const facts = `Project facts:
+- Org locations: ${locationNames.length ? locationNames.join(", ") : "(Webex not connected)"}
+- Mappings: ${stats?.total_mappings ?? 0} total, ${stats?.selected_count ?? 0} selected, ${stats?.unset_locations ?? 0} without a location`;
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     ...(context ? [{ role: "system", content: context }] : []),
+    { role: "system", content: facts },
     ...body.messages.map((m) => ({ role: m.role, content: String(m.content).slice(0, 4000) })),
   ];
 
   let lastError = "";
   for (const model of MODELS) {
-    // gpt-oss models speak the Responses API (instructions + input), not chat messages.
     const inputs: Record<string, unknown>[] = model.includes("gpt-oss")
       ? [
           {
@@ -71,9 +107,18 @@ ${mapping.notes ?? "(none)"}`;
     for (const input of inputs) {
       try {
         const result = (await c.env.AI.run(model as any, input as any)) as unknown as Record<string, unknown>;
-        const reply = extractReply(result);
-        if (reply) return c.json({ reply, model });
-        lastError = `model ${model} returned an empty/unrecognised response`;
+        let reply = extractReply(result);
+        if (!reply) {
+          lastError = `model ${model} returned an empty/unrecognised response`;
+          continue;
+        }
+        // Did the model ask to apply a fix?
+        const actionResult = await maybeExecuteAction(c.env, projectId, reply, locationNames);
+        if (actionResult) {
+          reply = `${actionResult.cleanedReply}\n\n${actionResult.summary}`;
+          return c.json({ reply, model, actionApplied: actionResult.ok });
+        }
+        return c.json({ reply, model });
       } catch (e) {
         lastError = `${model}: ${e instanceof Error ? e.message : e}`;
       }
@@ -82,11 +127,119 @@ ${mapping.notes ?? "(none)"}`;
   return c.json({ error: `AI request failed: ${lastError}` }, 502);
 });
 
+/** Parse a trailing ACTION line, validate against the allowlist, execute, summarise. */
+async function maybeExecuteAction(
+  env: Env,
+  projectId: string,
+  reply: string,
+  locationNames: string[],
+): Promise<{ cleanedReply: string; summary: string; ok: boolean } | null> {
+  const match = reply.match(/ACTION:\s*(\{[\s\S]*\})\s*$/);
+  if (!match) return null;
+  const cleanedReply = reply.slice(0, match.index).trim();
+  let action: { name?: string; args?: Record<string, unknown> };
+  try {
+    action = JSON.parse(match[1]);
+  } catch {
+    return { cleanedReply, summary: "⚠ I proposed a fix but its format was invalid — nothing was changed.", ok: false };
+  }
+  const args = action.args ?? {};
+
+  const requireLocation = (): string | null => {
+    const name = String(args.locationName ?? "").trim();
+    if (!name) return null;
+    if (locationNames.length > 0 && !locationNames.some((l) => l.toLowerCase() === name.toLowerCase())) return null;
+    return locationNames.find((l) => l.toLowerCase() === name.toLowerCase()) ?? name;
+  };
+
+  try {
+    switch (action.name) {
+      case "set_location_for_unset": {
+        const loc = requireLocation();
+        if (!loc) return { cleanedReply, summary: `⚠ "${args.locationName}" is not an existing Webex location — nothing was changed.`, ok: false };
+        const rows = (
+          await env.DB.prepare(
+            `SELECT id, target_payload, notes FROM mappings WHERE project_id = ?
+             AND json_extract(target_payload,'$.locationName') IS NULL
+             AND target_type IN ('person','workspace','hunt_group','call_pickup','call_park','auto_attendant')`,
+          )
+            .bind(projectId)
+            .all<{ id: string; target_payload: string; notes: string | null }>()
+        ).results;
+        for (const row of rows) {
+          const payload = JSON.parse(row.target_payload);
+          payload.locationName = loc;
+          const notes = (row.notes ?? "").split("\n").filter((n) => n && n !== NO_LOCATION_NOTE).join("\n");
+          await env.DB.prepare("UPDATE mappings SET target_payload = ?, notes = ? WHERE id = ?")
+            .bind(JSON.stringify(payload), notes || null, row.id)
+            .run();
+        }
+        return { cleanedReply, summary: `✅ Applied: set location "${loc}" on ${rows.length} item(s) that had none.`, ok: true };
+      }
+      case "set_location_all": {
+        const loc = requireLocation();
+        if (!loc) return { cleanedReply, summary: `⚠ "${args.locationName}" is not an existing Webex location — nothing was changed.`, ok: false };
+        const rows = (
+          await env.DB.prepare("SELECT id, target_payload, notes FROM mappings WHERE project_id = ?")
+            .bind(projectId)
+            .all<{ id: string; target_payload: string; notes: string | null }>()
+        ).results;
+        for (const row of rows) {
+          const payload = JSON.parse(row.target_payload);
+          payload.locationName = loc;
+          const notes = (row.notes ?? "").split("\n").filter((n) => n && n !== NO_LOCATION_NOTE).join("\n");
+          await env.DB.prepare("UPDATE mappings SET target_payload = ?, notes = ? WHERE id = ?")
+            .bind(JSON.stringify(payload), notes || null, row.id)
+            .run();
+        }
+        return { cleanedReply, summary: `✅ Applied: set location "${loc}" on all ${rows.length} mappings.`, ok: true };
+      }
+      case "regenerate_mappings": {
+        const r = await generateMappings(env, projectId);
+        return { cleanedReply, summary: `✅ Applied: regenerated ${r.generated} mappings (edits and overrides preserved).`, ok: true };
+      }
+      case "select_all":
+      case "deselect_all": {
+        const sel = action.name === "select_all" ? 1 : 0;
+        const targetType = args.targetType ? String(args.targetType) : null;
+        const result = targetType
+          ? await env.DB.prepare("UPDATE mappings SET selected = ? WHERE project_id = ? AND target_type = ?").bind(sel, projectId, targetType).run()
+          : await env.DB.prepare("UPDATE mappings SET selected = ? WHERE project_id = ?").bind(sel, projectId).run();
+        return { cleanedReply, summary: `✅ Applied: ${sel ? "selected" : "deselected"} ${result.meta.changes} mapping(s)${targetType ? ` of type ${targetType}` : ""}.`, ok: true };
+      }
+      case "set_voicemail_all": {
+        const enabled = args.enabled === true;
+        const r = await env.DB.prepare(
+          "UPDATE mappings SET vm_override = ?, target_payload = json_set(target_payload, '$.voicemail', json(?)) WHERE project_id = ? AND target_type = 'person'",
+        )
+          .bind(enabled ? 1 : 0, enabled ? "true" : "false", projectId)
+          .run();
+        return { cleanedReply, summary: `✅ Applied: voicemail ${enabled ? "enabled" : "disabled"} for ${r.meta.changes} people.`, ok: true };
+      }
+      case "set_call_permission_all": {
+        const level = String(args.level ?? "");
+        if (!CALL_PERMISSION_LEVELS.includes(level as never)) {
+          return { cleanedReply, summary: `⚠ "${level}" is not a valid call permission class — nothing was changed.`, ok: false };
+        }
+        const r = await env.DB.prepare(
+          "UPDATE mappings SET call_permission = ?, target_payload = json_set(target_payload, '$.callPermission', ?) WHERE project_id = ? AND target_type = 'person'",
+        )
+          .bind(level, level, projectId)
+          .run();
+        return { cleanedReply, summary: `✅ Applied: call permission class "${level}" set on ${r.meta.changes} people.`, ok: true };
+      }
+      default:
+        return { cleanedReply, summary: `⚠ "${action.name}" is not an available action — nothing was changed.`, ok: false };
+    }
+  } catch (e) {
+    return { cleanedReply, summary: `⚠ The fix failed: ${e instanceof Error ? e.message : e}`, ok: false };
+  }
+}
+
 /** Workers AI models differ in response shape — normalise to text. */
 function extractReply(result: Record<string, unknown>): string | null {
   if (typeof result.response === "string" && result.response.trim()) return result.response.trim();
   if (typeof result.output_text === "string" && result.output_text.trim()) return result.output_text.trim();
-  // gpt-oss "responses" shape: output: [{type:'message', content:[{type:'output_text', text}]}]
   const output = result.output;
   if (Array.isArray(output)) {
     const texts: string[] = [];
