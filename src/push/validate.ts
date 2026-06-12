@@ -37,6 +37,45 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
     premisesTargets = 0;
   }
 
+  // Existing org objects — so the dry run predicts duplicate collisions.
+  const safe = async <T>(fn: () => Promise<T[]>): Promise<T[]> => {
+    try {
+      return await fn();
+    } catch {
+      return [];
+    }
+  };
+  const [existingHunt, existingAAs, existingWorkspaces, existingTPs, existingParks, existingDialPlans] = await Promise.all([
+    safe(() => client.listHuntGroups()),
+    safe(() => client.listAutoAttendants()),
+    safe(() => client.listWorkspaces()),
+    safe(() => client.listTranslationPatterns()),
+    safe(() => client.listCallParkExtensions()),
+    safe(() => client.listDialPlans()),
+  ]);
+  const existingDialPatterns = new Map<string, string>(); // pattern -> dial plan name
+  for (const plan of existingDialPlans) {
+    for (const p of await safe(() => client.getDialPlanPatterns(plan.id))) {
+      existingDialPatterns.set(p, plan.name);
+    }
+  }
+  // Pickup groups are location-scoped — fetch only the locations this batch touches.
+  const existingPickups: { name: string; locationId: string }[] = [];
+  {
+    const pickupLocationIds = new Set<string>();
+    for (const item of items) {
+      if (item.target_type !== "call_pickup") continue;
+      const p = JSON.parse(item.target_payload);
+      const loc = locationByName.get(String(p.locationName ?? "").toLowerCase());
+      if (loc) pickupLocationIds.add(loc.id);
+    }
+    for (const locId of pickupLocationIds) {
+      for (const cp of await safe(() => client.listCallPickups(locId))) {
+        existingPickups.push({ name: String(cp.name), locationId: locId });
+      }
+    }
+  }
+
   const numbers = await client.listNumbers();
   const numberByE164 = new Map(numbers.map((n: any) => [n.phoneNumber, n]));
   const extensionsInUse = new Set(numbers.filter((n: any) => n.owner).map((n: any) => String(n.extension ?? "")));
@@ -125,6 +164,13 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
           worsen("amber");
           notes.push(`${payload.unmappedKeys.length} menu key(s) need manual configuration in Control Hub`);
         }
+        const dupAA = existingAAs.find(
+          (a: any) => String(a.name).toLowerCase() === String(payload.name).toLowerCase() || (payload.extension && String(a.extension) === String(payload.extension)),
+        );
+        if (dupAA) {
+          worsen("amber");
+          notes.push(`An auto attendant "${dupAA.name}" (ext ${dupAA.extension ?? "—"}) already exists — push will fail as a duplicate`);
+        }
       } else if (item.target_type === "call_park") {
         checkLocation();
         if (!payload.extension) {
@@ -133,6 +179,10 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
         } else if (extensionsInUse.has(String(payload.extension))) {
           worsen("amber");
           notes.push(`Extension ${payload.extension} appears to be in use`);
+        }
+        if (payload.extension && existingParks.some((pk: any) => String(pk.extension) === String(payload.extension))) {
+          worsen("amber");
+          notes.push(`A call park extension ${payload.extension} already exists in the org — push will fail as a duplicate`);
         }
       } else if (item.target_type === "workspace") {
         checkLocation();
@@ -157,6 +207,10 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
             notes.push(`Number ${payload.phoneNumber} is already assigned`);
           }
         }
+        if (existingWorkspaces.some((w: any) => String(w.displayName).toLowerCase() === String(payload.name).toLowerCase())) {
+          worsen("amber");
+          notes.push(`A workspace named "${payload.name}" already exists in the org — pushing will create a duplicate`);
+        }
       } else if (item.target_type === "translation_pattern") {
         if (!payload.replacementPattern) {
           worsen("red");
@@ -164,6 +218,9 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
         } else {
           worsen("amber");
           notes.push("Translation patterns push at org level — verify matching/replacement syntax before pushing");
+        }
+        if (existingTPs.some((t: any) => t.matchingPattern === payload.matchingPattern)) {
+          notes.push(`A translation pattern matching "${payload.matchingPattern}" already exists — push will record it as existing (no duplicate created)`);
         }
       } else if (item.target_type === "route_pattern") {
         if (premisesTargets === 0) {
@@ -176,6 +233,11 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
         } else {
           worsen("amber");
           notes.push(`Will be added to dial plan "CUCM via ${payload.routeChoice.name}" — verify pattern syntax`);
+        }
+        const planWithPattern = existingDialPatterns.get(String(payload.dialPattern));
+        if (planWithPattern) {
+          worsen("amber");
+          notes.push(`Dial pattern ${payload.dialPattern} already exists in dial plan "${planWithPattern}" — push will fail as a duplicate`);
         }
       } else if (item.target_type === "hunt_group" || item.target_type === "call_pickup") {
         checkLocation();
@@ -197,6 +259,22 @@ export async function validateBatch(env: Env, projectId: string, batchId: string
         if (item.target_type === "hunt_group" && payload.extension && extensionsInUse.has(String(payload.extension))) {
           worsen("amber");
           notes.push(`Hunt group extension ${payload.extension} appears to be in use`);
+        }
+        if (item.target_type === "hunt_group") {
+          const dup = existingHunt.find(
+            (h: any) => String(h.name).toLowerCase() === String(payload.name).toLowerCase() || (payload.extension && String(h.extension) === String(payload.extension)),
+          );
+          if (dup) {
+            worsen("amber");
+            notes.push(`A hunt group "${dup.name}" (ext ${dup.extension ?? "—"}) already exists — push will fail as a duplicate`);
+          }
+        }
+        if (item.target_type === "call_pickup") {
+          const loc = locationByName.get(String(payload.locationName ?? "").toLowerCase());
+          if (loc && existingPickups.some((cp) => cp.locationId === loc.id && cp.name.toLowerCase() === String(payload.name).toLowerCase())) {
+            worsen("amber");
+            notes.push(`A call pickup group "${payload.name}" already exists at ${payload.locationName} — push will fail as a duplicate`);
+          }
         }
         if ((payload.unresolvedMembers ?? []).length > 0) {
           worsen("amber");

@@ -239,6 +239,39 @@ export class WebexClient {
     return this.request("DELETE", `/telephony/config/locations/${locationId}/callParkExtensions/${extensionId}`);
   }
 
+  // --- org-state reads for dry-run "already exists" checks ---
+
+  async listHuntGroups(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/huntGroups", undefined, { max: "1000" });
+    return r.huntGroups ?? [];
+  }
+
+  async listAutoAttendants(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/autoAttendants", undefined, { max: "1000" });
+    return r.autoAttendants ?? [];
+  }
+
+  async listWorkspaces(): Promise<any[]> {
+    const r = await this.request("GET", "/workspaces", undefined, { max: "1000" });
+    return r.items ?? [];
+  }
+
+  async listCallPickups(locationId: string): Promise<any[]> {
+    const r = await this.request("GET", `/telephony/config/locations/${locationId}/callPickups`, undefined, { max: "1000" });
+    return r.callPickups ?? [];
+  }
+
+  async listCallParkExtensions(): Promise<any[]> {
+    const r = await this.request("GET", "/telephony/config/callParkExtensions", undefined, { max: "1000" });
+    return r.callParkExtensions ?? [];
+  }
+
+  /** Patterns already present in a premises dial plan. */
+  async getDialPlanPatterns(dialPlanId: string): Promise<string[]> {
+    const r = await this.request("GET", `/telephony/config/premisePstn/dialPlans/${dialPlanId}`);
+    return (r.dialPatterns ?? []).map((p: unknown) => String(p));
+  }
+
   createWorkspace(payload: Record<string, unknown>) {
     return this.request("POST", "/workspaces", payload);
   }
