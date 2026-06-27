@@ -80,6 +80,22 @@ export function WebexPage() {
   const [status, setStatus] = useState<Status | null>(null);
   const [locations, setLocations] = useState<any[] | null>(null);
   const [licenses, setLicenses] = useState<any[] | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshMsg, setRefreshMsg] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+
+  async function refreshToken() {
+    setRefreshing(true);
+    setRefreshMsg(null);
+    try {
+      const r = await api.post<{ expires_at: string }>(`/api/projects/${projectId}/webex/refresh`);
+      setStatus((s) => (s ? { ...s, expires_at: r.expires_at } : s));
+      setRefreshMsg({ tone: "ok", text: `Token refreshed — now valid until ${new Date(r.expires_at).toLocaleString()}.` });
+    } catch (e) {
+      setRefreshMsg({ tone: "error", text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   useEffect(() => {
     api.get<Status>(`/api/projects/${projectId}/webex/status`).then((s) => {
@@ -118,9 +134,17 @@ export function WebexPage() {
             <dd>{status.expires_at ? new Date(status.expires_at).toLocaleString() : "—"} <span className="dim small">(auto-refreshed)</span></dd>
             <dt></dt>
             <dd>
+              <button className="btn sm" onClick={refreshToken} disabled={refreshing}>
+                {refreshing ? "Refreshing…" : "Refresh now"}
+              </button>{" "}
               <a className="btn sm" href={`/auth/login?project=${projectId}`}>
                 Re-authorise
               </a>
+              {refreshMsg && (
+                <div style={{ marginTop: 8 }}>
+                  <Alert tone={refreshMsg.tone}>{refreshMsg.text}</Alert>
+                </div>
+              )}
             </dd>
           </div>
         ) : (

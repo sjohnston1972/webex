@@ -1,8 +1,21 @@
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 import type { AppContext } from "../env";
-import { WebexClient } from "../webex/client";
+import { WebexClient, WebexError, refreshProjectToken } from "../webex/client";
 
 export const webex = new Hono<AppContext>();
+
+// Force a refresh-token roll on demand (manual "Refresh now" button); the daily
+// cron does this automatically, this is for peace-of-mind / immediate checks.
+webex.post("/:id/webex/refresh", async (c) => {
+  try {
+    const { expiresAt } = await refreshProjectToken(c.env, c.req.param("id"));
+    return c.json({ ok: true, expires_at: expiresAt });
+  } catch (e) {
+    const status = (e instanceof WebexError ? e.status : 502) as ContentfulStatusCode;
+    return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, status);
+  }
+});
 
 webex.get("/:id/webex/status", async (c) => {
   const row = await c.env.DB.prepare(

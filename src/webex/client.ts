@@ -111,6 +111,23 @@ export async function keepTokensWarm(
   return results;
 }
 
+/**
+ * Force a refresh-token roll for one project regardless of access-token age.
+ * Backs the manual "Refresh now" button. Returns the new access-token expiry.
+ */
+export async function refreshProjectToken(env: Env, projectId: string): Promise<{ expiresAt: string }> {
+  const row = await env.DB.prepare("SELECT refresh_token_enc FROM webex_tokens WHERE project_id = ?")
+    .bind(projectId)
+    .first<{ refresh_token_enc: string }>();
+  if (!row) throw new WebexError("Webex is not connected for this project", 401);
+  const refreshToken = await decrypt(env.ENC_KEY, row.refresh_token_enc);
+  await refreshAccessToken(env, projectId, refreshToken);
+  const updated = await env.DB.prepare("SELECT expires_at FROM webex_tokens WHERE project_id = ?")
+    .bind(projectId)
+    .first<{ expires_at: string }>();
+  return { expiresAt: updated!.expires_at };
+}
+
 export async function storeTokens(
   env: Env,
   projectId: string,
