@@ -33,6 +33,35 @@ axl.put("/:id/axl", async (c) => {
   return c.json({ saved: true });
 });
 
+// Live reachability check for the UI (fired on page load). Pings CUCM via AXL
+// with an 8s cap so a dead tunnel can't stall the page, and reports the real
+// state rather than the cached verified_at flag.
+axl.get("/:id/axl/status", async (c) => {
+  const projectId = c.req.param("id");
+  const conn = await c.env.DB.prepare("SELECT base_url, cucm_version, verified_at FROM axl_connections WHERE project_id = ?")
+    .bind(projectId)
+    .first<{ base_url: string; cucm_version: string | null; verified_at: string | null }>();
+  if (!conn) return c.json({ configured: false, connected: false });
+  const client = await getAxlClient(c.env, projectId);
+  if (!client) return c.json({ configured: false, connected: false });
+  try {
+    const version = await client.getVersion(8000);
+    const checkedAt = nowIso();
+    await c.env.DB.prepare("UPDATE axl_connections SET verified_at = ?, cucm_version = ? WHERE project_id = ?")
+      .bind(checkedAt, version, projectId)
+      .run();
+    return c.json({ configured: true, connected: true, cucmVersion: version, checkedAt });
+  } catch (e) {
+    return c.json({
+      configured: true,
+      connected: false,
+      error: e instanceof AxlError || e instanceof Error ? e.message : String(e),
+      cucmVersion: conn.cucm_version,
+      lastVerifiedAt: conn.verified_at,
+    });
+  }
+});
+
 axl.post("/:id/axl/test", async (c) => {
   const projectId = c.req.param("id");
   const client = await getAxlClient(c.env, projectId);

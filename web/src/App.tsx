@@ -42,12 +42,34 @@ function ThemeToggle() {
   );
 }
 
+type AxlLive = { configured: boolean; connected: boolean; cucmVersion?: string; error?: string; checkedAt?: string; lastVerifiedAt?: string };
+
 function PipelinePanel({ projectId, pathname }: { projectId: string; pathname: string }) {
   const [summary, setSummary] = useState<Summary | null>(null);
+  // null while the live CUCM ping is in flight; resolved object = live result.
+  const [axlLive, setAxlLive] = useState<AxlLive | null>(null);
 
   useEffect(() => {
     api.get<Summary>(`/api/projects/${projectId}/summary`).then(setSummary).catch(() => setSummary(null));
   }, [projectId, pathname]);
+
+  // Live reachability check, so the dot reflects "is CUCM up right now", not "was it ever verified".
+  const axlConfigured = !!summary?.axl;
+  useEffect(() => {
+    if (!axlConfigured) {
+      setAxlLive(null);
+      return;
+    }
+    let cancelled = false;
+    setAxlLive(null); // show "checking…" while we ping
+    api
+      .get<AxlLive>(`/api/projects/${projectId}/axl/status`)
+      .then((r) => !cancelled && setAxlLive(r))
+      .catch(() => !cancelled && setAxlLive({ configured: true, connected: false, error: "status check failed" }));
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, pathname, axlConfigured]);
 
   if (!summary) return null;
   const total = Object.values(summary.counts).reduce((a, b) => a + b, 0);
@@ -102,8 +124,16 @@ function PipelinePanel({ projectId, pathname }: { projectId: string; pathname: s
       />
       <Row
         label="CUCM (AXL)"
-        dot={summary.axl?.verified_at ? "green" : summary.axl ? "amber" : "grey"}
-        value={summary.axl?.verified_at ? `CUCM ${summary.axl.cucm_version ?? ""}` : summary.axl ? "unverified" : "not linked"}
+        dot={!summary.axl ? "grey" : axlLive === null ? "amber" : axlLive.connected ? "green" : "red"}
+        value={
+          !summary.axl
+            ? "not linked"
+            : axlLive === null
+              ? "checking…"
+              : axlLive.connected
+                ? `CUCM ${axlLive.cucmVersion ?? summary.axl.cucm_version ?? ""}`
+                : "unreachable"
+        }
         pop={
           summary.axl
             ? {
@@ -111,8 +141,13 @@ function PipelinePanel({ projectId, pathname }: { projectId: string; pathname: s
                 rows: [
                   ["endpoint", summary.axl.base_url],
                   ["username", summary.axl.username],
-                  ["version", summary.axl.cucm_version ?? "—"],
-                  ["verified", summary.axl.verified_at ? new Date(summary.axl.verified_at).toLocaleString() : "not yet"],
+                  ["version", (axlLive?.connected ? axlLive.cucmVersion : summary.axl.cucm_version) ?? "—"],
+                  axlLive === null
+                    ? (["live check", "pinging…"] as [string, string])
+                    : axlLive.connected
+                      ? (["live check", `reachable · ${axlLive.checkedAt ? new Date(axlLive.checkedAt).toLocaleTimeString() : "now"}`] as [string, string])
+                      : (["live check", `unreachable — ${(axlLive.error ?? "no response").slice(0, 80)}`] as [string, string]),
+                  ["last verified", summary.axl.verified_at ? new Date(summary.axl.verified_at).toLocaleString() : "not yet"],
                 ],
               }
             : { title: "CUCM via AXL", rows: [["status", "not configured — see Source"]] }

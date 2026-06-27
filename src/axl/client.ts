@@ -42,7 +42,7 @@ export class AxlClient {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
   }
 
-  private async request(method: string, innerXml: string): Promise<any> {
+  private async request(method: string, innerXml: string, timeoutMs?: number): Promise<any> {
     const envelope = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns="${AXL_NS}">
   <soapenv:Header/>
@@ -61,10 +61,17 @@ export class AxlClient {
           SOAPAction: `"CUCM:DB ver=${AXL_VER} ${method}"`,
         },
         body: envelope,
+        signal: timeoutMs ? AbortSignal.timeout(timeoutMs) : undefined,
       });
     } catch (e) {
+      const reason =
+        e instanceof Error && e.name === "TimeoutError"
+          ? `timed out after ${timeoutMs}ms (tunnel down or CUCM unreachable)`
+          : e instanceof Error
+            ? e.message
+            : String(e);
       throw new AxlError(
-        `Cannot reach AXL at ${this.baseUrl}: ${e instanceof Error ? e.message : String(e)}. ` +
+        `Cannot reach AXL at ${this.baseUrl}: ${reason}. ` +
           `If CUCM is on-prem on port 8443, expose it on 443 via a Cloudflare Tunnel.`,
       );
     }
@@ -87,8 +94,8 @@ export class AxlClient {
     return body?.[`${method}Response`]?.return;
   }
 
-  async getVersion(): Promise<string> {
-    const ret = await this.request("getCCMVersion", "");
+  async getVersion(timeoutMs?: number): Promise<string> {
+    const ret = await this.request("getCCMVersion", "", timeoutMs);
     return text(ret?.componentVersion?.version);
   }
 

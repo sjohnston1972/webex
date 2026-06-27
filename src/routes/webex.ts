@@ -56,35 +56,23 @@ webex.get("/:id/webex/pstn", async (c) => {
   try {
     const client = await WebexClient.forProject(c.env, c.req.param("id"));
     const locations = await client.listLocations();
-    const locationPstn = await Promise.all(
-      locations.map(async (l: any) => {
-        let connection: unknown = null;
-        let options: unknown[] = [];
-        try {
-          connection = await client.getPstnConnection(l.id);
-        } catch {
-          connection = null;
-        }
-        try {
-          options = await client.listPstnConnectionOptions(l.id);
-        } catch {
-          options = [];
-        }
-        return { id: l.id, name: l.name, connection, options };
-      }),
-    );
-    let trunks: any[] = [];
-    let routeGroups: any[] = [];
-    let dialPlans: any[] = [];
-    try {
-      trunks = await client.listPremisesTrunks();
-    } catch { /* premises PSTN APIs may be unavailable on some orgs */ }
-    try {
-      routeGroups = await client.listPremisesRouteGroups();
-    } catch { /* ditto */ }
-    try {
-      dialPlans = await client.listDialPlans();
-    } catch { /* ditto */ }
+    // Run the per-location PSTN reads and the org-wide premises lists all
+    // concurrently — these were sequential and dominated the ~4s response time.
+    const [locationPstn, trunks, routeGroups, dialPlans] = await Promise.all([
+      Promise.all(
+        locations.map(async (l: any) => {
+          const [connection, options] = await Promise.all([
+            client.getPstnConnection(l.id).catch(() => null),
+            client.listPstnConnectionOptions(l.id).catch(() => [] as unknown[]),
+          ]);
+          return { id: l.id, name: l.name, connection, options };
+        }),
+      ),
+      // premises PSTN APIs may be unavailable on some orgs — tolerate failure
+      client.listPremisesTrunks().catch(() => [] as any[]),
+      client.listPremisesRouteGroups().catch(() => [] as any[]),
+      client.listDialPlans().catch(() => [] as any[]),
+    ]);
     return c.json({ locations: locationPstn, trunks, routeGroups, dialPlans });
   } catch (e) {
     return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
