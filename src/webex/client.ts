@@ -51,6 +51,66 @@ export async function exchangeCode(env: Env, code: string): Promise<{ accessToke
   return { accessToken: body.access_token, refreshToken: body.refresh_token, expiresIn: body.expires_in };
 }
 
+/**
+ * Exchange a refresh token for a fresh access token and persist the rolled tokens.
+ * Webex returns a new refresh token with a renewed ~90-day window on each use, so
+ * calling this periodically (see keepTokensWarm) prevents the refresh token from
+ * lapsing during idle periods. Returns the new access token.
+ */
+async function refreshAccessToken(env: Env, projectId: string, refreshToken: string): Promise<string> {
+  const res = await fetch(`${BASE}/access_token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      client_id: env.WEBEX_CLIENT_ID,
+      client_secret: env.WEBEX_SECRET,
+      refresh_token: refreshToken,
+    }),
+  });
+  const body = (await res.json()) as any;
+  if (!res.ok) throw new WebexError(`Token refresh failed: ${body.message ?? res.status} — reconnect Webex`, 401);
+  await storeTokens(env, projectId, {
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token ?? refreshToken,
+    expiresIn: body.expires_in,
+  });
+  return body.access_token;
+}
+
+/**
+ * Cron keep-alive: proactively roll the refresh token for every connected project
+ * whose stored tokens are older than `maxAgeDays`, so the ~90-day refresh-token
+ * window never lapses while the app sits idle. Returns a per-project result for
+ * logging; one project's failure never blocks the others.
+ */
+export async function keepTokensWarm(
+  env: Env,
+  maxAgeDays = 7,
+): Promise<{ projectId: string; refreshed: boolean; error?: string }[]> {
+  const rows = await env.DB.prepare("SELECT project_id, refresh_token_enc, updated_at FROM webex_tokens").all<{
+    project_id: string;
+    refresh_token_enc: string;
+    updated_at: string;
+  }>();
+  const cutoff = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+  const results: { projectId: string; refreshed: boolean; error?: string }[] = [];
+  for (const row of rows.results ?? []) {
+    if (new Date(row.updated_at).getTime() > cutoff) {
+      results.push({ projectId: row.project_id, refreshed: false }); // still fresh — leave it
+      continue;
+    }
+    try {
+      const refreshToken = await decrypt(env.ENC_KEY, row.refresh_token_enc);
+      await refreshAccessToken(env, row.project_id, refreshToken);
+      results.push({ projectId: row.project_id, refreshed: true });
+    } catch (e) {
+      results.push({ projectId: row.project_id, refreshed: false, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+  return results;
+}
+
 export async function storeTokens(
   env: Env,
   projectId: string,
@@ -93,24 +153,7 @@ export class WebexClient {
     let accessToken = await decrypt(env.ENC_KEY, row.access_token_enc);
     if (new Date(row.expires_at).getTime() - Date.now() < 5 * 60 * 1000) {
       const refreshToken = await decrypt(env.ENC_KEY, row.refresh_token_enc);
-      const res = await fetch(`${BASE}/access_token`, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "refresh_token",
-          client_id: env.WEBEX_CLIENT_ID,
-          client_secret: env.WEBEX_SECRET,
-          refresh_token: refreshToken,
-        }),
-      });
-      const body = (await res.json()) as any;
-      if (!res.ok) throw new WebexError(`Token refresh failed: ${body.message ?? res.status} — reconnect Webex`, 401);
-      accessToken = body.access_token;
-      await storeTokens(env, projectId, {
-        accessToken: body.access_token,
-        refreshToken: body.refresh_token ?? refreshToken,
-        expiresIn: body.expires_in,
-      });
+      accessToken = await refreshAccessToken(env, projectId, refreshToken);
     }
     return new WebexClient(env, projectId, accessToken);
   }

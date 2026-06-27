@@ -14,6 +14,7 @@ import { reports } from "./routes/reports";
 import { unity } from "./routes/unity";
 import { webex } from "./routes/webex";
 import { processJob } from "./push/runner";
+import { keepTokensWarm } from "./webex/client";
 
 const app = new Hono<AppContext>();
 
@@ -72,6 +73,19 @@ app.onError((err, c) => {
 
 export default {
   fetch: app.fetch,
+
+  // Daily cron: roll Webex refresh tokens before their ~90-day window can lapse,
+  // so a connected project never silently needs re-authorising after idle time.
+  async scheduled(_event: ScheduledController, env: Env, _ctx: ExecutionContext): Promise<void> {
+    const results = await keepTokensWarm(env);
+    const refreshed = results.filter((r) => r.refreshed).length;
+    const failed = results.filter((r) => r.error);
+    if (failed.length) {
+      console.error(`Webex token keep-alive: refreshed ${refreshed}, ${failed.length} failed`, failed);
+    } else {
+      console.log(`Webex token keep-alive: refreshed ${refreshed}/${results.length} project(s)`);
+    }
+  },
 
   async queue(batch: MessageBatch<{ jobId: string }>, env: Env): Promise<void> {
     for (const message of batch.messages) {
