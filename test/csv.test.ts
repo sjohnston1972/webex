@@ -15,6 +15,15 @@ describe("parseCsv", () => {
     expect(rows[0]).toEqual(["x", "y"]);
     expect(rows).toHaveLength(2);
   });
+
+  it("treats a stray mid-field quote as a literal, not a quote opener", () => {
+    // A lone unescaped quote must not swallow the rest of the file into one field.
+    const rows = parseCsv('Reception 6" display,Main\n1001,1002\n');
+    expect(rows).toEqual([
+      ['Reception 6" display', "Main"],
+      ["1001", "1002"],
+    ]);
+  });
 });
 
 describe("detectKind", () => {
@@ -32,6 +41,10 @@ describe("detectKind", () => {
   });
   it("returns unknown otherwise", () => {
     expect(detectKind(["foo", "bar"])).toBe("unknown");
+  });
+  it("classifies a phone export with a 'User ID' owner column as phones, not users", () => {
+    // The owner column is literally "User ID"; device+model must still win.
+    expect(detectKind(["Device Name", "Description", "Model", "User ID"])).toBe("phones");
   });
 });
 
