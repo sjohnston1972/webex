@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { uuid } from "../lib/util";
+import { safeJsonParse, uuid } from "../lib/util";
 import { listUnattachedDns } from "../mapping/engine";
 import { pickCallingLicense, WebexClient } from "../webex/client";
 
@@ -122,7 +122,7 @@ projects.get("/:id/issues", async (c) => {
       .bind(id)
       .all<{ target_type: string; target_payload: string; confidence: string; selected: number }>()
   ).results;
-  const parsed = mappings.map((m) => ({ ...m, p: JSON.parse(m.target_payload) }));
+  const parsed = mappings.map((m) => ({ ...m, p: safeJsonParse(m.target_payload, {} as any) }));
 
   // Demand: selected items if anything is selected, otherwise everything eligible.
   const anySelected = parsed.some((m) => m.selected === 1);

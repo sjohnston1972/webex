@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppContext, Env } from "../env";
 import { CALL_PERMISSION_LEVELS, generateMappings, NO_LOCATION_NOTE } from "../mapping/engine";
+import { safeJsonParse } from "../lib/util";
 import { WebexClient } from "../webex/client";
 
 // Best-first model chain: gpt-oss reasons better; llama is the reliable fallback.
@@ -171,7 +172,7 @@ async function buildMappingDigest(env: Env, projectId: string): Promise<string> 
     return p.name ?? p.matchingPattern ?? p.cucmPattern ?? "(unnamed)";
   };
   const line = (r: (typeof rows)[number]): string => {
-    const p = JSON.parse(r.target_payload);
+    const p = safeJsonParse(r.target_payload, {} as any);
     const num = p.phoneNumber ?? p.extension ?? p.dialPattern ?? "";
     const note = (r.notes ?? "").split("\n")[0]?.slice(0, 160) ?? "";
     return `- [${r.target_type}] ${identity(r.target_type, p)}${num ? ` (${num})` : ""} — ${note || "no notes"}`;

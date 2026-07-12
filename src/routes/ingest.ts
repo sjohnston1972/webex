@@ -47,6 +47,13 @@ ingest.post("/:id/snapshots/:snapshotId/parse", async (c) => {
 
   await c.env.DB.prepare("UPDATE source_snapshots SET status = 'parsing' WHERE id = ?").bind(snapshotId).run();
 
+  // Re-parsing must replace, not append — otherwise a double-clicked/retried
+  // parse doubles every src_* row and inflates counts. Clear this snapshot's
+  // prior rows first so parse is idempotent.
+  for (const table of ["src_users", "src_phones", "src_lines", "src_vm_boxes", "src_vm_greetings"]) {
+    await c.env.DB.prepare(`DELETE FROM ${table} WHERE snapshot_id = ?`).bind(snapshotId).run();
+  }
+
   const counts: Record<string, number> = {};
   const warnings: string[] = [];
   try {
@@ -58,6 +65,14 @@ ingest.post("/:id/snapshots/:snapshotId/parse", async (c) => {
         continue;
       }
       const filename = obj.customMetadata?.filename ?? key;
+      // Guard the isolate's ~128 MB memory: parsing buffers whole files (and
+      // decompresses zips) in memory, so refuse anything unreasonably large
+      // rather than OOM-killing the parse mid-run.
+      const MAX_BYTES = 80 * 1024 * 1024;
+      if (obj.size > MAX_BYTES) {
+        warnings.push(`${filename}: ${(obj.size / 1048576).toFixed(0)} MB exceeds the ${MAX_BYTES / 1048576} MB parse limit — split the export and re-upload`);
+        continue;
+      }
       if (/\.wav$/i.test(filename)) {
         const matched = await storeGreeting(c.env, projectId, snapshotId, filename, key, warnings);
         counts.vm_greetings = (counts.vm_greetings ?? 0) + (matched ? 1 : 0);

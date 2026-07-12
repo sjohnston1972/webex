@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { uuid } from "../lib/util";
+import { batchAll, uuid } from "../lib/util";
 import { validateBatch } from "../push/validate";
 import { startPush, startRollback } from "../push/runner";
 
@@ -18,11 +18,12 @@ batches.post("/:id/batches", async (c) => {
   const batchId = uuid();
   const name = body.name?.trim() || `Batch ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
   await c.env.DB.prepare("INSERT INTO batches (id, project_id, name) VALUES (?, ?, ?)").bind(batchId, projectId, name).run();
-  for (const m of selected) {
-    await c.env.DB.prepare("INSERT INTO batch_items (id, batch_id, mapping_id) VALUES (?, ?, ?)")
-      .bind(uuid(), batchId, m.id)
-      .run();
-  }
+  // Insert items atomically (chunked D1 batch) so a mid-loop failure can't leave
+  // a batch with a partial item set.
+  await batchAll(
+    c.env.DB,
+    selected.map((m) => c.env.DB.prepare("INSERT INTO batch_items (id, batch_id, mapping_id) VALUES (?, ?, ?)").bind(uuid(), batchId, m.id)),
+  );
   return c.json({ id: batchId, name, items: selected.length }, 201);
 });
 

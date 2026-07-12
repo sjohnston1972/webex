@@ -13,6 +13,17 @@ export async function batchAll(db: D1Database, stmts: D1PreparedStatement[], chu
   }
 }
 
+/** Parse a JSON payload column, returning a fallback instead of throwing so one
+ * malformed/NULL row can't 500 an entire report or listing endpoint. */
+export function safeJsonParse<T = any>(s: string | null | undefined, fallback: T): T {
+  if (!s) return fallback;
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 export function csvEscape(value: unknown): string {
   let s = value === null || value === undefined ? "" : String(value);
   // Formula/CSV injection: a cell that Excel/Sheets would evaluate as a formula

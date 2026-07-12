@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
 import { CALL_PERMISSION_LEVELS, generateMappings, NO_LOCATION_NOTE, recheckMapping } from "../mapping/engine";
+import { safeJsonParse } from "../lib/util";
 
 export const mappings = new Hono<AppContext>();
 
@@ -156,7 +157,7 @@ mappings.post("/:id/mappings/bulk", async (c) => {
       .bind(projectId)
       .all<{ id: string; target_payload: string }>();
     for (const row of results) {
-      const payload = JSON.parse(row.target_payload);
+      const payload = safeJsonParse(row.target_payload, {} as any);
       payload.routeChoice = body.routeChoice;
       // A route target resolves the "review" state — re-check so the pill goes green.
       const recheck = recheckMapping("route_pattern", payload);
@@ -185,7 +186,7 @@ mappings.post("/:id/mappings/bulk", async (c) => {
       .bind(projectId)
       .all<{ id: string; target_payload: string; notes: string | null }>();
     for (const row of results) {
-      const payload = JSON.parse(row.target_payload);
+      const payload = safeJsonParse(row.target_payload, {} as any);
       payload.locationName = body.locationName;
       // The "no location" note is resolved by this action — drop it.
       const notes = (row.notes ?? "")
