@@ -42,6 +42,23 @@ Answering style:
 
 export const ai = new Hono<AppContext>();
 
+// The auto-executed ACTION protocol lives only in the trusted system prompt.
+// Uploaded CUCM/Unity data (names, notes, descriptions) is untrusted and could
+// contain a planted "ACTION: {...}" line hoping the model parrots it back as the
+// final line of its reply. Neutralise the token in anything data-derived so it
+// can never be reproduced as a live action directive.
+function neutralizeActionTokens(s: string): string {
+  return s.replace(/ACTION\s*:/gi, "ACTION​:");
+}
+
+// Whether the user's latest turn actually asks us to change something. Server-
+// side gate so injected data alone (with no user request) can never trigger an
+// action even if the model emits one.
+function userRequestedAction(messages: { role: string; content: string }[]): boolean {
+  const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  return /\b(apply|appli|fix|do it|go ahead|please do|make it so|set|select|deselect|regenerate|enable|disable|assign|change|update|clear)\b/i.test(lastUser);
+}
+
 ai.post("/:id/ai/chat", async (c) => {
   const projectId = c.req.param("id");
   const body = await c.req.json<{ mappingId?: string; context?: string; messages?: { role: "user" | "assistant"; content: string }[] }>();
@@ -64,6 +81,8 @@ ${mapping.notes ?? "(none)"}`;
     }
   }
   if (!context && body.context) context = `Topic under discussion (project readiness issue):\n${String(body.context).slice(0, 3000)}`;
+  // Defuse any planted action directive in the data-derived context.
+  context = neutralizeActionTokens(context);
 
   // Live project facts so actions can be chosen sensibly.
   const stats = await c.env.DB.prepare(
@@ -86,7 +105,7 @@ ${mapping.notes ?? "(none)"}`;
 - Org locations: ${locationNames.length ? locationNames.join(", ") : "(Webex not connected)"}
 - Mappings: ${stats?.total_mappings ?? 0} total, ${stats?.selected_count ?? 0} selected, ${stats?.unset_locations ?? 0} without a location
 
-${await buildMappingDigest(c.env, projectId)}`;
+${neutralizeActionTokens(await buildMappingDigest(c.env, projectId))}`;
 
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -114,10 +133,14 @@ ${await buildMappingDigest(c.env, projectId)}`;
           lastError = `model ${model} returned an empty/unrecognised response`;
           continue;
         }
-        // Did the model ask to apply a fix?
-        const actionResult = await maybeExecuteAction(c.env, projectId, reply, locationNames);
+        // Did the model ask to apply a fix? Only honour it when the user's own
+        // latest message asked us to act — a data-injected ACTION line with no
+        // user request is ignored (its directive is stripped from the reply).
+        const actionResult = userRequestedAction(body.messages)
+          ? await maybeExecuteAction(c.env, projectId, reply, locationNames)
+          : stripActionLine(reply);
         if (actionResult) {
-          reply = `${actionResult.cleanedReply}\n\n${actionResult.summary}`;
+          reply = actionResult.summary ? `${actionResult.cleanedReply}\n\n${actionResult.summary}` : actionResult.cleanedReply;
           return c.json({ reply, model, actionApplied: actionResult.ok });
         }
         return c.json({ reply, model });
@@ -159,6 +182,13 @@ async function buildMappingDigest(env: Env, projectId: string): Promise<string> 
   if (red.length) parts.push(`Blocked items (${red.length}):\n${red.map(line).join("\n")}`);
   if (amber.length) parts.push(`Review-state items (showing ${amber.length}):\n${amber.map(line).join("\n")}`);
   return parts.join("\n\n");
+}
+
+/** Strip a trailing ACTION line without executing it (user didn't ask to act). */
+function stripActionLine(reply: string): { cleanedReply: string; summary: string; ok: boolean } | null {
+  const match = reply.match(/ACTION:\s*(\{[\s\S]*\})\s*$/);
+  if (!match) return null;
+  return { cleanedReply: reply.slice(0, match.index).trim(), summary: "", ok: false };
 }
 
 /** Parse a trailing ACTION line, validate against the allowlist, execute, summarise. */

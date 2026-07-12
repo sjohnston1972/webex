@@ -43,13 +43,13 @@ app.route("/api/pin", pin);
 app.use("/api/*", async (c, next) => {
   const path = new URL(c.req.url).pathname;
   if (path === "/api/health" || path.startsWith("/api/pin")) return next();
-  if (!(await verifySession(c.env.ENC_KEY, getCookie(c, "wx_pin")))) {
+  if (!(await verifySession(c.env.ENC_KEY, c.env.PIN_CODE, getCookie(c, "wx_pin")))) {
     return c.json({ error: "PIN required", code: "pin_required" }, 401);
   }
   return next();
 });
 app.use("/auth/*", async (c, next) => {
-  if (!(await verifySession(c.env.ENC_KEY, getCookie(c, "wx_pin")))) {
+  if (!(await verifySession(c.env.ENC_KEY, c.env.PIN_CODE, getCookie(c, "wx_pin")))) {
     return c.text("PIN required — open the app and sign in first", 401);
   }
   return next();

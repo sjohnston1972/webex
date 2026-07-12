@@ -14,7 +14,11 @@ export async function batchAll(db: D1Database, stmts: D1PreparedStatement[], chu
 }
 
 export function csvEscape(value: unknown): string {
-  const s = value === null || value === undefined ? "" : String(value);
+  let s = value === null || value === undefined ? "" : String(value);
+  // Formula/CSV injection: a cell that Excel/Sheets would evaluate as a formula
+  // (leading = + - @, tab or CR) is neutralised with a leading apostrophe so a
+  // CUCM object named e.g. =HYPERLINK(...) can't execute in a delivered report.
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   if (/[",\r\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }

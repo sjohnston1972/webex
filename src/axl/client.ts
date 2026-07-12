@@ -32,7 +32,9 @@ export function text(value: unknown): string {
 }
 
 export class AxlClient {
-  private parser = new XMLParser({ removeNSPrefix: true, ignoreAttributes: false });
+  // processEntities:false disables DTD/entity expansion so a hostile or
+  // MITM'd response can't mount a billion-laughs expansion DoS against the isolate.
+  private parser = new XMLParser({ removeNSPrefix: true, ignoreAttributes: false, processEntities: false });
 
   constructor(
     private baseUrl: string,
@@ -83,14 +85,17 @@ export class AxlClient {
     try {
       parsed = this.parser.parse(bodyText);
     } catch {
-      throw new AxlError(`AXL returned non-XML response (HTTP ${res.status}): ${bodyText.slice(0, 300)}`, res.status);
+      // Don't reflect the raw upstream body — with a misconfigured baseUrl that
+      // would echo an arbitrary endpoint's response back to the caller.
+      throw new AxlError(`AXL returned a non-XML response (HTTP ${res.status}) — check the baseUrl points at CUCM's /axl endpoint.`, res.status);
     }
     const body = parsed?.Envelope?.Body;
     const fault = body?.Fault;
     if (fault) {
-      throw new AxlError(`AXL fault: ${text(fault.faultstring) || JSON.stringify(fault).slice(0, 300)}`, res.status);
+      // faultstring is a parsed AXL error field, safe to surface for debugging.
+      throw new AxlError(`AXL fault: ${text(fault.faultstring) || "unspecified AXL fault"}`, res.status);
     }
-    if (!res.ok) throw new AxlError(`AXL HTTP ${res.status}: ${bodyText.slice(0, 300)}`, res.status);
+    if (!res.ok) throw new AxlError(`AXL request failed (HTTP ${res.status}).`, res.status);
     return body?.[`${method}Response`]?.return;
   }
 
