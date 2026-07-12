@@ -76,7 +76,7 @@ export async function startPush(env: Env, projectId: string, batchId: string): P
     }
   }
   // No people in the batch? Release the group jobs immediately.
-  if (people.length === 0) queued += await releaseWaitingJobs(env, batchId);
+  if (people.length === 0) queued += await releaseWaitingJobs(env, batchId, "push");
   return { queued };
 }
 
@@ -91,34 +91,48 @@ export async function startRollback(env: Env, projectId: string, batchId: string
       .all<{ id: string; target_type: string }>()
   ).results;
 
-  // Groups first, then people/workspaces (reverse of push order).
-  const ordered = [
-    ...items.filter((i) => GROUP_TYPES.includes(i.target_type)),
-    ...items.filter((i) => i.target_type === "person" || i.target_type === "workspace"),
-  ];
+  // Groups first, then people/workspaces (reverse of push order). Groups run in
+  // the first wave; people wait until every group rollback has finished so we
+  // never delete a member while a hunt/pickup group still references them.
+  const groups = items.filter((i) => GROUP_TYPES.includes(i.target_type));
+  const people = items.filter((i) => i.target_type === "person" || i.target_type === "workspace");
   let queued = 0;
-  for (const item of ordered) {
+  for (const item of [...groups, ...people]) {
     const jobId = uuid();
+    const firstWave = GROUP_TYPES.includes(item.target_type);
     await env.DB.prepare(
-      "INSERT INTO push_jobs (id, batch_id, batch_item_id, action, status) VALUES (?, ?, ?, 'rollback', 'pending')",
+      "INSERT INTO push_jobs (id, batch_id, batch_item_id, action, status) VALUES (?, ?, ?, 'rollback', ?)",
     )
-      .bind(jobId, batchId, item.id)
+      .bind(jobId, batchId, item.id, firstWave ? "pending" : "waiting")
       .run();
-    await env.PUSH_QUEUE.send({ jobId });
-    queued++;
+    if (firstWave) {
+      await env.PUSH_QUEUE.send({ jobId });
+      queued++;
+    }
   }
+  // No groups to remove first? Release the people rollbacks immediately.
+  if (groups.length === 0) queued += await releaseWaitingJobs(env, batchId, "rollback");
   return { queued };
 }
 
-async function releaseWaitingJobs(env: Env, batchId: string): Promise<number> {
+async function releaseWaitingJobs(env: Env, batchId: string, action: string): Promise<number> {
   const waiting = (
-    await env.DB.prepare("SELECT id FROM push_jobs WHERE batch_id = ? AND status = 'waiting'").bind(batchId).all<{ id: string }>()
+    await env.DB.prepare("SELECT id FROM push_jobs WHERE batch_id = ? AND action = ? AND status = 'waiting'")
+      .bind(batchId, action)
+      .all<{ id: string }>()
   ).results;
+  let released = 0;
   for (const job of waiting) {
-    await env.DB.prepare("UPDATE push_jobs SET status = 'pending' WHERE id = ?").bind(job.id).run();
-    await env.PUSH_QUEUE.send({ jobId: job.id });
+    // Only enqueue jobs this call actually transitions. Two finishers can race
+    // into releaseWaitingJobs concurrently; the conditional UPDATE ensures each
+    // waiting job is sent to the queue exactly once.
+    const r = await env.DB.prepare("UPDATE push_jobs SET status = 'pending' WHERE id = ? AND status = 'waiting'").bind(job.id).run();
+    if (r.meta.changes === 1) {
+      await env.PUSH_QUEUE.send({ jobId: job.id });
+      released++;
+    }
   }
-  return waiting.length;
+  return released;
 }
 
 async function loadItem(env: Env, batchItemId: string): Promise<ItemRow | null> {
@@ -137,7 +151,18 @@ async function loadItem(env: Env, batchItemId: string): Promise<ItemRow | null> 
 export async function processJob(env: Env, jobId: string): Promise<void> {
   const job = await env.DB.prepare("SELECT * FROM push_jobs WHERE id = ?").bind(jobId).first<JobRow>();
   if (!job || job.status === "done" || job.status === "superseded") return;
-  await env.DB.prepare("UPDATE push_jobs SET status = 'running', attempts = attempts + 1 WHERE id = ?").bind(jobId).run();
+
+  // Atomic claim: only the worker that transitions this job out of
+  // pending/waiting proceeds. Cloudflare Queues are at-least-once, so the same
+  // jobId can be delivered concurrently; without this claim two deliveries both
+  // run pushItem and double-create the Webex object. The failure path resets a
+  // job to 'pending' (below), so the queue's own retries still get through.
+  const claim = await env.DB.prepare(
+    "UPDATE push_jobs SET status = 'running', attempts = attempts + 1 WHERE id = ? AND status IN ('pending','waiting')",
+  )
+    .bind(jobId)
+    .run();
+  if (claim.meta.changes !== 1) return; // a concurrent delivery already owns it
 
   const item = await loadItem(env, job.batch_item_id);
   if (!item) {
@@ -167,17 +192,21 @@ export async function processJob(env: Env, jobId: string): Promise<void> {
     await finalizeBatchIfComplete(env, item.batch_id);
   }
 
-  // If this was the last person/workspace push in the batch, release the waiting group jobs.
-  if (job.action === "push" && (item.target_type === "person" || item.target_type === "workspace")) {
+  // Once the first wave for this action has fully drained, release the second
+  // (waiting) wave. Push runs people/workspaces then groups; rollback reverses
+  // it (groups then people), so the dependency ordering holds both directions.
+  const firstWave = job.action === "push" ? ["person", "workspace"] : GROUP_TYPES;
+  if (firstWave.includes(item.target_type)) {
+    const placeholders = firstWave.map(() => "?").join(",");
     const remaining = await env.DB.prepare(
       `SELECT COUNT(*) AS n FROM push_jobs pj
        JOIN batch_items bi ON bi.id = pj.batch_item_id
        JOIN mappings m ON m.id = bi.mapping_id
-       WHERE pj.batch_id = ? AND pj.action = 'push' AND m.target_type IN ('person','workspace') AND pj.status IN ('pending','running')`,
+       WHERE pj.batch_id = ? AND pj.action = ? AND m.target_type IN (${placeholders}) AND pj.status IN ('pending','running')`,
     )
-      .bind(item.batch_id)
+      .bind(item.batch_id, job.action, ...firstWave)
       .first<{ n: number }>();
-    if ((remaining?.n ?? 0) === 0) await releaseWaitingJobs(env, item.batch_id);
+    if ((remaining?.n ?? 0) === 0) await releaseWaitingJobs(env, item.batch_id, job.action);
   }
 }
 
@@ -199,17 +228,20 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     return loc;
   };
 
-  // If this item already errored on an earlier attempt, an "existing" object
-  // found now was almost certainly created by that attempt (created-then-5xx)
-  // — attribute it to this batch so rollback can remove it.
-  const retriedAfterError = !!item.error_text;
+  // If a prior attempt may already have created the object, an "existing"
+  // object found now was almost certainly created by that attempt — attribute
+  // it to this batch so rollback can remove it. Two ways a prior attempt can
+  // create-then-not-record: it threw after the create (error_text set), or the
+  // isolate was evicted mid-run so push_status is stuck at 'pushing' (line ~189
+  // committed 'pushing' but no terminal state was ever written).
+  const priorAttemptMayHaveCreated = !!item.error_text || item.push_status === "pushing";
 
   if (item.target_type === "person") {
     const existing = payload.email ? await client.findPersonByEmail(payload.email) : null;
     if (existing) {
       await recordSuccess(env, item.id, existing.id, {
-        created: retriedAfterError,
-        note: retriedAfterError ? "created by an earlier attempt of this batch" : "already existed",
+        created: priorAttemptMayHaveCreated,
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
         type: "person",
       });
       if (payload.voicemail) {
@@ -283,6 +315,22 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     }
   } else if (item.target_type === "workspace") {
     const loc = await resolveLocation();
+    // Idempotent: a workspace with this name at this location may already exist
+    // (a previous attempt of this batch, or genuinely pre-existing). Creating
+    // unconditionally would duplicate it on an at-least-once queue redelivery.
+    const existingWs = (await client.listWorkspaces()).find(
+      (w: any) =>
+        String(w.displayName ?? "").toLowerCase() === String(payload.name).toLowerCase() &&
+        (w.locationId === undefined || w.locationId === loc.id),
+    );
+    if (existingWs) {
+      await recordSuccess(env, item.id, existingWs.id, {
+        created: priorAttemptMayHaveCreated,
+        type: "workspace",
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
+      });
+      return;
+    }
     const calling: Record<string, unknown> = { locationId: loc.id };
     if (payload.extension) calling.extension = payload.extension;
     if (payload.phoneNumber) calling.phoneNumber = payload.phoneNumber;
@@ -297,6 +345,23 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     await recordSuccess(env, item.id, ws.id, { created: true, type: "workspace" });
   } else if (item.target_type === "hunt_group") {
     const loc = await resolveLocation();
+    // Idempotent guard (see workspace above): skip creation if a hunt group
+    // with this name or extension already exists in the location.
+    const existingHg = (await client.listHuntGroups()).find(
+      (h: any) =>
+        (h.locationId === undefined || h.locationId === loc.id) &&
+        (String(h.name ?? "").toLowerCase() === String(payload.name).toLowerCase() ||
+          (payload.extension && String(h.extension ?? "") === String(payload.extension))),
+    );
+    if (existingHg) {
+      await recordSuccess(env, item.id, existingHg.id, {
+        created: priorAttemptMayHaveCreated,
+        type: "hunt_group",
+        locationId: loc.id,
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
+      });
+      return;
+    }
     const agents: { id: string }[] = [];
     const missing: string[] = [];
     for (const email of payload.agentEmails ?? []) {
@@ -316,6 +381,19 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     if (missing.length > 0) await appendError(env, item.id, `Created without unresolvable members: ${missing.join(", ")}`);
   } else if (item.target_type === "call_pickup") {
     const loc = await resolveLocation();
+    // Idempotent guard (see workspace above): call pickups are location-scoped.
+    const existingCp = (await client.listCallPickups(loc.id)).find(
+      (cp: any) => String(cp.name ?? "").toLowerCase() === String(payload.name).toLowerCase(),
+    );
+    if (existingCp) {
+      await recordSuccess(env, item.id, existingCp.id, {
+        created: priorAttemptMayHaveCreated,
+        type: "call_pickup",
+        locationId: loc.id,
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
+      });
+      return;
+    }
     let agents: string[] = [];
     const missing: string[] = [];
     for (const email of payload.agentEmails ?? []) {
@@ -355,6 +433,23 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
   } else if (item.target_type === "auto_attendant") {
     if (!payload.extension) throw new Error("Auto attendant needs an extension — edit the mapping first");
     const loc = await resolveLocation();
+    // Idempotent guard (see workspace above): skip if an AA with this name or
+    // extension already exists in the location.
+    const existingAa = (await client.listAutoAttendants()).find(
+      (a: any) =>
+        (a.locationId === undefined || a.locationId === loc.id) &&
+        (String(a.name ?? "").toLowerCase() === String(payload.name).toLowerCase() ||
+          String(a.extension ?? "") === String(payload.extension)),
+    );
+    if (existingAa) {
+      await recordSuccess(env, item.id, existingAa.id, {
+        created: priorAttemptMayHaveCreated,
+        type: "auto_attendant",
+        locationId: loc.id,
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
+      });
+      return;
+    }
     // Auto attendants require a business schedule at the location.
     let scheduleName: string;
     const schedules = (await client.listSchedules(loc.id)).filter((sc: any) => String(sc.type).toLowerCase() === "businesshours");
@@ -388,6 +483,21 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
   } else if (item.target_type === "call_park") {
     if (!payload.extension) throw new Error("Call park range/pattern cannot push — edit the mapping to a single extension first");
     const loc = await resolveLocation();
+    // Idempotent guard (see workspace above): a park extension is unique per
+    // location on its extension.
+    const existingPark = (await client.listCallParkExtensions()).find(
+      (pk: any) =>
+        String(pk.extension ?? "") === String(payload.extension) && (pk.locationId === undefined || pk.locationId === loc.id),
+    );
+    if (existingPark) {
+      await recordSuccess(env, item.id, existingPark.id, {
+        created: priorAttemptMayHaveCreated,
+        type: "call_park",
+        locationId: loc.id,
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
+      });
+      return;
+    }
     const result = (await client.createCallParkExtension(loc.id, { name: payload.name, extension: payload.extension })) as any;
     await recordSuccess(env, item.id, result.id, { created: true, type: "call_park", locationId: loc.id });
   } else if (item.target_type === "translation_pattern") {
@@ -397,9 +507,9 @@ async function pushItem(env: Env, item: ItemRow): Promise<void> {
     const existing = (await client.listTranslationPatterns()).find((t: any) => t.matchingPattern === payload.matchingPattern);
     if (existing) {
       await recordSuccess(env, item.id, existing.id, {
-        created: retriedAfterError,
+        created: priorAttemptMayHaveCreated,
         type: "translation_pattern",
-        note: retriedAfterError ? "created by an earlier attempt of this batch" : "already existed",
+        note: priorAttemptMayHaveCreated ? "created by an earlier attempt of this batch" : "already existed",
       });
       return;
     }
