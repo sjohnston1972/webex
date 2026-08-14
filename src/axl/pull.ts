@@ -74,13 +74,16 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
     const phones = await axl.listPhones();
     const linesByDevice = new Map<string, string[]>();
     try {
-      const rows = await axl.sql(
-        `select d.name as device, n.dnorpattern as dn, dnpm.numplanindex as idx
+      // Paged: devicenumplanmap is one row per line per device — a few thousand
+      // phones is already tens of thousands of rows. numplanindex keeps the
+      // per-device line order; pkid makes the sort unique so pages can't shift.
+      const rows = await axl.sqlPaged(
+        `d.name as device, n.dnorpattern as dn, dnpm.numplanindex as idx
          from device d
          join devicenumplanmap dnpm on dnpm.fkdevice = d.pkid
          join numplan n on n.pkid = dnpm.fknumplan
-         where d.tkclass = 1
-         order by d.name, dnpm.numplanindex`,
+         where d.tkclass = 1`,
+        "d.name, dnpm.numplanindex, dnpm.pkid",
       );
       for (const r of rows) {
         const device = text(r.device);
@@ -208,8 +211,9 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
     const pickups = await axl.listPickupGroups();
     let membersByGroup = new Map<string, string[]>();
     try {
-      const rows = await axl.sql(
-        "select pg.name as pgname, n.dnorpattern as dn from pickupgroup pg inner join pickupgrouplinemap m on m.fkpickupgroup = pg.pkid inner join numplan n on n.pkid = m.fknumplan_line",
+      const rows = await axl.sqlPaged(
+        "pg.name as pgname, n.dnorpattern as dn from pickupgroup pg inner join pickupgrouplinemap m on m.fkpickupgroup = pg.pkid inner join numplan n on n.pkid = m.fknumplan_line",
+        "m.pkid",
       );
       for (const r of rows) {
         const g = text(r.pgname);
@@ -266,11 +270,13 @@ export async function pullFromAxl(env: Env, projectId: string): Promise<PullResu
       "Device template": "device_template",
     };
     try {
-      const rows = await axl.sql(
-        `select n.dnorpattern as pattern, tpu.name as usage, rp.name as pname, n.description as descr
+      // numplan is the biggest table in the pull — every pattern in the system.
+      const rows = await axl.sqlPaged(
+        `n.dnorpattern as pattern, tpu.name as usage, rp.name as pname, n.description as descr
          from numplan n
          join typepatternusage tpu on n.tkpatternusage = tpu.enum
          left join routepartition rp on n.fkroutepartition = rp.pkid`,
+        "n.pkid",
       );
       for (const r of rows) {
         const usage = text(r.usage);

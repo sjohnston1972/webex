@@ -7,6 +7,17 @@ import { XMLParser } from "fast-xml-parser";
 const AXL_NS = "http://www.cisco.com/AXL/API/12.5";
 const AXL_VER = "12.5";
 
+// CUCM throttles large AXL responses ("Query request too large", commonly a few
+// thousand rows / 8 MB), so every list and bulk SQL pull is paged. 1000 rows a
+// page keeps a comfortable margin on default throttle settings.
+const DEFAULT_PAGE_SIZE = 1000;
+// Only getVersion used to pass a timeout; a hung tunnel stalled every other call
+// until the Worker's own limit killed the pull.
+const DEFAULT_TIMEOUT_MS = 60_000;
+// Backstop: a CUCM that ignored <skip> would otherwise loop forever re-reading
+// page one. 500 pages is far past any real cluster.
+const MAX_PAGES = 500;
+
 export class AxlError extends Error {
   constructor(
     message: string,
@@ -36,15 +47,21 @@ export class AxlClient {
   // MITM'd response can't mount a billion-laughs expansion DoS against the isolate.
   private parser = new XMLParser({ removeNSPrefix: true, ignoreAttributes: false, processEntities: false });
 
+  private pageSize: number;
+  private timeoutMs: number;
+
   constructor(
     private baseUrl: string,
     private username: string,
     private password: string,
+    opts: { pageSize?: number; timeoutMs?: number } = {},
   ) {
     this.baseUrl = baseUrl.replace(/\/+$/, "");
+    this.pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  private async request(method: string, innerXml: string, timeoutMs?: number): Promise<any> {
+  private async request(method: string, innerXml: string, timeoutMs: number = this.timeoutMs): Promise<any> {
     const envelope = `<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns="${AXL_NS}">
   <soapenv:Header/>
@@ -93,7 +110,16 @@ export class AxlClient {
     const fault = body?.Fault;
     if (fault) {
       // faultstring is a parsed AXL error field, safe to surface for debugging.
-      throw new AxlError(`AXL fault: ${text(fault.faultstring) || "unspecified AXL fault"}`, res.status);
+      const faultString = text(fault.faultstring) || "unspecified AXL fault";
+      // Paging should prevent this, but a cluster with a tighter throttle than
+      // the default page size assumes still needs to say so in plain English.
+      if (/too large|throttle/i.test(faultString)) {
+        throw new AxlError(
+          `CUCM refused the query as too large ("${faultString}") — retry with a smaller page size (AxlClient pageSize option).`,
+          res.status,
+        );
+      }
+      throw new AxlError(`AXL fault: ${faultString}`, res.status);
     }
     if (!res.ok) throw new AxlError(`AXL request failed (HTTP ${res.status}).`, res.status);
     return body?.[`${method}Response`]?.return;
@@ -104,43 +130,63 @@ export class AxlClient {
     return text(ret?.componentVersion?.version);
   }
 
+  /**
+   * Run a list* request in pages. AXL takes <skip>/<first> as siblings of
+   * searchCriteria/returnedTags; a page shorter than pageSize is the last one.
+   * Return shape is identical to the old single-shot call, so callers are
+   * unaffected.
+   */
+  private async listPaged(method: string, innerXml: string, key: string, pageSize = this.pageSize): Promise<any[]> {
+    const all: any[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const skip = page * pageSize;
+      const ret = await this.request(method, `${innerXml}<skip>${skip}</skip><first>${pageSize}</first>`);
+      const rows = ensureArray(ret?.[key]);
+      all.push(...rows);
+      if (rows.length < pageSize) return all;
+    }
+    throw new AxlError(
+      `${method} did not terminate after ${MAX_PAGES} pages of ${pageSize} — CUCM may be ignoring <skip>; check the AXL version.`,
+    );
+  }
+
   async listUsers(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listUser",
       `<searchCriteria><userid>%</userid></searchCriteria>
        <returnedTags>
          <userid/><firstName/><lastName/><mailid/><department/>
          <primaryExtension><pattern/><routePartitionName/></primaryExtension>
        </returnedTags>`,
+      "user",
     );
-    return ensureArray(ret?.user);
   }
 
   async listPhones(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listPhone",
       `<searchCriteria><name>%</name></searchCriteria>
        <returnedTags><name/><description/><model/><ownerUserName/><devicePoolName/><locationName/></returnedTags>`,
+      "phone",
     );
-    return ensureArray(ret?.phone);
   }
 
   async listLines(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listLine",
       `<searchCriteria><pattern>%</pattern></searchCriteria>
        <returnedTags><pattern/><description/><routePartitionName/></returnedTags>`,
+      "line",
     );
-    return ensureArray(ret?.line);
   }
 
   async listHuntPilots(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listHuntPilot",
       `<searchCriteria><pattern>%</pattern></searchCriteria>
        <returnedTags><pattern/><description/><huntListName/></returnedTags>`,
+      "huntPilot",
     );
-    return ensureArray(ret?.huntPilot);
   }
 
   /** Returns ordered line group names for a hunt list. */
@@ -176,78 +222,98 @@ export class AxlClient {
   }
 
   async listTranslationPatterns(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listTransPattern",
       `<searchCriteria><pattern>%</pattern></searchCriteria>
        <returnedTags><pattern/><description/><routePartitionName/><calledPartyTransformationMask/><prefixDigitsOut/></returnedTags>`,
+      "transPattern",
     );
-    return ensureArray(ret?.transPattern);
   }
 
   async listPickupGroups(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listCallPickupGroup",
       `<searchCriteria><pattern>%</pattern></searchCriteria>
        <returnedTags><pattern/><name/><description/></returnedTags>`,
+      "callPickupGroup",
     );
-    return ensureArray(ret?.callPickupGroup);
   }
 
   // --- dial plan (report-only objects) ---
 
   async listRoutePartitions(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listRoutePartition",
       `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/></returnedTags>`,
+      "routePartition",
     );
-    return ensureArray(ret?.routePartition);
   }
 
   async listCss(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listCss",
       `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/><clause/></returnedTags>`,
+      "css",
     );
-    return ensureArray(ret?.css);
   }
 
   async listRoutePatterns(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listRoutePattern",
       `<searchCriteria><pattern>%</pattern></searchCriteria>
        <returnedTags><pattern/><description/><routePartitionName/><blockEnable/></returnedTags>`,
+      "routePattern",
     );
-    return ensureArray(ret?.routePattern);
   }
 
   async listRouteLists(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listRouteList",
       `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/></returnedTags>`,
+      "routeList",
     );
-    return ensureArray(ret?.routeList);
   }
 
   async listRouteGroups(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listRouteGroup",
       `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/></returnedTags>`,
+      "routeGroup",
     );
-    return ensureArray(ret?.routeGroup);
   }
 
   async listSipTrunks(): Promise<any[]> {
-    const ret = await this.request(
+    return this.listPaged(
       "listSipTrunk",
       `<searchCriteria><name>%</name></searchCriteria><returnedTags><name/><description/></returnedTags>`,
+      "sipTrunk",
     );
-    return ensureArray(ret?.sipTrunk);
   }
 
-  /** Thin SQL escape hatch — used for pickup group membership. */
+  /** Thin SQL escape hatch — for queries small enough to answer in one response. */
   async sql(query: string): Promise<any[]> {
     const ret = await this.request("executeSQLQuery", `<sql>${escapeXml(query)}</sql>`);
     return ensureArray(ret?.row);
+  }
+
+  /**
+   * Page a bulk SQL pull. Informix wants SKIP/FIRST immediately after `select`,
+   * so pass the query *without* its leading `select` — e.g.
+   * `sqlPaged("n.dnorpattern as dn from numplan n", "n.pkid")`. The ORDER BY key
+   * must be unique and stable (a pkid), otherwise rows can shift between pages
+   * and be skipped or double-counted.
+   */
+  async sqlPaged(baseQuery: string, orderBy: string, pageSize = this.pageSize): Promise<any[]> {
+    const all: any[] = [];
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const skip = page * pageSize;
+      const rows = await this.sql(`select skip ${skip} first ${pageSize} ${baseQuery} order by ${orderBy}`);
+      all.push(...rows);
+      if (rows.length < pageSize) return all;
+    }
+    throw new AxlError(
+      `SQL query did not terminate after ${MAX_PAGES} pages of ${pageSize} — check the ORDER BY key "${orderBy}" is unique.`,
+    );
   }
 }
 
