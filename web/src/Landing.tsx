@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { api } from "./api";
+import { ApiError, api } from "./api";
 import { Spinner } from "./components";
 
 export function Landing({ onUnlocked }: { onUnlocked: () => void }) {
@@ -14,8 +14,10 @@ export function Landing({ onUnlocked }: { onUnlocked: () => void }) {
     try {
       await api.post("/api/pin", { pin: pinValue });
       onUnlocked();
-    } catch {
-      setError("Incorrect PIN");
+    } catch (e) {
+      // Show the server's own wording: a lockout says "try again later", and
+      // reporting that as "Incorrect PIN" would just make the operator retry.
+      setError(e instanceof ApiError && e.status === 429 ? e.message : "Incorrect PIN");
       setPinValue("");
       setBusy(false);
     }
