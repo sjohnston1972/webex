@@ -33,6 +33,23 @@ Runs entirely on Cloudflare:
    deletes exactly what the batch created, in reverse order.
 5. **Reports** — readiness / dry-run / post-push CSVs.
 
+### Re-ingesting source data
+
+The two ingest paths replace at different granularities, on purpose:
+
+- **AXL / CUPI pull** — replaces *everything* previously pulled from that
+  system. A pull is a full estate dump, so a second pull is the new truth.
+- **Upload + parse** — replaces only the rows from *that snapshot*. Parsing the
+  same snapshot twice is idempotent (double-click, retry, or a resumed partial
+  parse all leave the same rows). Uploads stay additive **across** snapshots
+  because one upload is usually one file: uploading `phones.csv` after
+  `users.csv` must not wipe the users.
+
+Consequence to be aware of: re-uploading a **corrected** CSV creates a *new*
+snapshot, so the superseded rows from the earlier upload stay in `src_*`
+alongside the corrected ones. There is no per-snapshot delete yet — until there
+is, correct a bad upload before parsing it, or start the project again.
+
 ## CUCM reachability (AXL)
 
 CUCM serves AXL at `https://<host>:8443/axl/`. Workers can only make
