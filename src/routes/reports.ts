@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
+import { loadBatch } from "../lib/batch";
 import { safeJsonParse, toCsv } from "../lib/util";
 import { listUnattachedDns } from "../mapping/engine";
 
@@ -59,6 +60,7 @@ reports.get("/:id/reports/unattached-dns", async (c) => {
 });
 
 reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
+  if (!(await loadBatch(c.env, c.req.param("id"), c.req.param("batchId")))) return c.json({ error: "not found" }, 404);
   const { results } = await c.env.DB.prepare(
     `SELECT m.target_type, m.target_payload, bi.validate_status, bi.validate_notes
      FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id WHERE bi.batch_id = ?`,
@@ -74,6 +76,7 @@ reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
 });
 
 reports.get("/:id/batches/:batchId/result.csv", async (c) => {
+  if (!(await loadBatch(c.env, c.req.param("id"), c.req.param("batchId")))) return c.json({ error: "not found" }, 404);
   const { results } = await c.env.DB.prepare(
     `SELECT m.target_type, m.target_payload, bi.push_status, bi.webex_resource_id, bi.error_text
      FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id WHERE bi.batch_id = ?`,

@@ -82,6 +82,18 @@ export async function startPush(env: Env, projectId: string, batchId: string): P
 
 export async function startRollback(env: Env, projectId: string, batchId: string): Promise<{ queued: number }> {
   await env.DB.prepare("UPDATE batches SET status = 'rolling_back' WHERE id = ?").bind(batchId).run();
+
+  // Kill any push job still outstanding for this batch before queueing deletes.
+  // Cloudflare Queues are at-least-once, so a push job from a previous run can
+  // still be redelivered and create a resource *after* the rollback pass has
+  // gone by — an orphan the batch can no longer account for. Superseded jobs
+  // are no-ops in processJob.
+  await env.DB.prepare(
+    "UPDATE push_jobs SET status = 'superseded' WHERE batch_id = ? AND action = 'push' AND status IN ('pending','waiting','running')",
+  )
+    .bind(batchId)
+    .run();
+
   const items = (
     await env.DB.prepare(
       `SELECT bi.id, m.target_type FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id
