@@ -42,11 +42,13 @@ export class UnityClient {
     }
     if (res.status === 401) throw new CupiError("Unity authentication failed (401) — check username/password", 401);
     const text = await res.text();
-    if (!res.ok) throw new CupiError(`CUPI HTTP ${res.status}: ${text.slice(0, 300)}`, res.status);
+    // Don't reflect the raw upstream body — with a misconfigured baseUrl that
+    // would echo an arbitrary endpoint's response back to the caller.
+    if (!res.ok) throw new CupiError(`CUPI request failed (HTTP ${res.status}).`, res.status);
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new CupiError(`CUPI returned non-JSON (HTTP ${res.status}): ${text.slice(0, 300)}`, res.status);
+      throw new CupiError(`CUPI returned a non-JSON response (HTTP ${res.status}) — check the baseUrl points at Unity's /vmrest endpoint.`, res.status);
     }
   }
 
@@ -75,8 +77,9 @@ export class UnityClient {
 
   /** Recorded stream files for a call handler's Standard greeting (empty = no custom recording). */
   async listGreetingStreams(callHandlerObjectId: string): Promise<{ languageCode: string }[]> {
+    const id = encodeURIComponent(callHandlerObjectId);
     try {
-      const r = await this.request<any>(`/handlers/callhandlers/${callHandlerObjectId}/greetings/Standard/greetingstreamfiles`);
+      const r = await this.request<any>(`/handlers/callhandlers/${id}/greetings/Standard/greetingstreamfiles`);
       return ensureArray(r.GreetingStreamFile).map((g: any) => ({ languageCode: String(g.LanguageCode ?? "1033") }));
     } catch (e) {
       if (e instanceof CupiError && e.httpStatus === 404) return [];
@@ -86,7 +89,9 @@ export class UnityClient {
 
   /** Download the Standard greeting WAV, or null if none recorded. */
   downloadGreeting(callHandlerObjectId: string, languageCode: string): Promise<ArrayBuffer | null> {
-    return this.requestBinary(`/handlers/callhandlers/${callHandlerObjectId}/greetings/Standard/greetingstreamfiles/${languageCode}/audio`);
+    const id = encodeURIComponent(callHandlerObjectId);
+    const lang = encodeURIComponent(languageCode);
+    return this.requestBinary(`/handlers/callhandlers/${id}/greetings/Standard/greetingstreamfiles/${lang}/audio`);
   }
 
   /** Non-primary call handlers (the real IVR/menu handlers, not per-user mailbox handlers). */
@@ -96,7 +101,7 @@ export class UnityClient {
   }
 
   async getMenuEntries(callHandlerObjectId: string): Promise<any[]> {
-    const r = await this.request<any>(`/handlers/callhandlers/${callHandlerObjectId}/menuentries`);
+    const r = await this.request<any>(`/handlers/callhandlers/${encodeURIComponent(callHandlerObjectId)}/menuentries`);
     return ensureArray(r.MenuEntry);
   }
 
@@ -104,12 +109,18 @@ export class UnityClient {
   async listUsers(): Promise<any[]> {
     const users: any[] = [];
     const pageSize = 200;
-    for (let page = 1; page <= 50; page++) {
+    const maxPages = 500; // ceiling of 100k mailboxes — larger than any real Unity
+    for (let page = 1; page <= maxPages; page++) {
       const r = await this.request<any>(`/users?rowsPerPage=${pageSize}&pageNumber=${page}`);
       const batch = ensureArray(r.User);
       users.push(...batch);
       const total = Number(r["@total"] ?? users.length);
-      if (users.length >= total || batch.length === 0) break;
+      if (users.length >= total || batch.length === 0) return users;
+      // Guard against silent truncation: if we hit the ceiling with more to
+      // come, fail loudly rather than quietly dropping the remaining mailboxes.
+      if (page === maxPages && users.length < total) {
+        throw new CupiError(`Unity reports ${total} mailboxes — exceeds the ${pageSize * maxPages} paging ceiling; narrow the export.`);
+      }
     }
     return users;
   }

@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { AppContext } from "../env";
-import { toCsv } from "../lib/util";
+import { loadBatch } from "../lib/batch";
+import { safeJsonParse, toCsv } from "../lib/util";
 import { listUnattachedDns } from "../mapping/engine";
 
 export const reports = new Hono<AppContext>();
@@ -23,7 +24,7 @@ reports.get("/:id/reports/readiness.csv", async (c) => {
     .all<{ target_type: string; target_payload: string; confidence: string; selected: number; status: string; notes: string | null }>();
 
   const rows = results.map((r) => {
-    const p = JSON.parse(r.target_payload);
+    const p = safeJsonParse(r.target_payload, {} as any);
     const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
     return [r.target_type, label, p.extension ?? p.phoneNumber ?? "", p.locationName ?? "", r.confidence, r.selected ? "yes" : "no", r.status, r.notes ?? ""];
   });
@@ -59,6 +60,7 @@ reports.get("/:id/reports/unattached-dns", async (c) => {
 });
 
 reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
+  if (!(await loadBatch(c.env, c.req.param("id"), c.req.param("batchId")))) return c.json({ error: "not found" }, 404);
   const { results } = await c.env.DB.prepare(
     `SELECT m.target_type, m.target_payload, bi.validate_status, bi.validate_notes
      FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id WHERE bi.batch_id = ?`,
@@ -66,7 +68,7 @@ reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
     .bind(c.req.param("batchId"))
     .all<{ target_type: string; target_payload: string; validate_status: string | null; validate_notes: string | null }>();
   const rows = results.map((r) => {
-    const p = JSON.parse(r.target_payload);
+    const p = safeJsonParse(r.target_payload, {} as any);
     const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
     return [r.target_type, label, r.validate_status ?? "not validated", r.validate_notes ?? ""];
   });
@@ -74,6 +76,7 @@ reports.get("/:id/batches/:batchId/dryrun.csv", async (c) => {
 });
 
 reports.get("/:id/batches/:batchId/result.csv", async (c) => {
+  if (!(await loadBatch(c.env, c.req.param("id"), c.req.param("batchId")))) return c.json({ error: "not found" }, 404);
   const { results } = await c.env.DB.prepare(
     `SELECT m.target_type, m.target_payload, bi.push_status, bi.webex_resource_id, bi.error_text
      FROM batch_items bi JOIN mappings m ON m.id = bi.mapping_id WHERE bi.batch_id = ?`,
@@ -81,7 +84,7 @@ reports.get("/:id/batches/:batchId/result.csv", async (c) => {
     .bind(c.req.param("batchId"))
     .all<{ target_type: string; target_payload: string; push_status: string; webex_resource_id: string | null; error_text: string | null }>();
   const rows = results.map((r) => {
-    const p = JSON.parse(r.target_payload);
+    const p = safeJsonParse(r.target_payload, {} as any);
     const label = r.target_type === "person" ? (p.email ?? p.displayName) : p.name;
     return [r.target_type, label, r.push_status, r.webex_resource_id ?? "", r.error_text ?? ""];
   });

@@ -228,10 +228,18 @@ export function OverviewPage() {
     mapTotals.selected += m.selected ?? 0;
   }
 
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const remove = async () => {
     setBusy(true);
-    await api.delete(`/api/projects/${projectId}`);
-    navigate("/");
+    setDeleteError(null);
+    try {
+      await api.delete(`/api/projects/${projectId}`);
+      navigate("/");
+    } catch (e) {
+      // Surface the failure instead of leaving the button spinning forever.
+      setDeleteError(e instanceof Error ? e.message : "Delete failed");
+      setBusy(false);
+    }
   };
 
   return (
@@ -363,14 +371,15 @@ export function OverviewPage() {
         ) : (
           <div className="toolbar">
             <span>Deletes all parsed data, mappings, batch history and uploaded files for this project. Webex objects already pushed are untouched.</span>
-            <button className="btn" onClick={() => setConfirmDelete(false)}>
+            <button className="btn" onClick={() => setConfirmDelete(false)} disabled={busy}>
               Keep it
             </button>
             <button className="btn danger" onClick={remove} disabled={busy}>
-              Delete permanently
+              {busy ? "Deleting…" : "Delete permanently"}
             </button>
           </div>
         )}
+        {deleteError && <div className="alert error" style={{ marginTop: 10 }}>{deleteError}</div>}
       </Card>
     </>
   );

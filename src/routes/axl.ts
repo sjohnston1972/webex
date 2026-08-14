@@ -3,6 +3,7 @@ import type { AppContext } from "../env";
 import { AxlClient, AxlError } from "../axl/client";
 import { getAxlClient, pullFromAxl } from "../axl/pull";
 import { encrypt } from "../lib/crypto";
+import { assertAllowedConnectorUrl } from "../lib/net";
 import { nowIso } from "../lib/util";
 
 export const axl = new Hono<AppContext>();
@@ -14,7 +15,11 @@ axl.put("/:id/axl", async (c) => {
   const baseUrl = body.baseUrl?.trim();
   const username = body.username?.trim();
   if (!baseUrl || !username) return c.json({ error: "baseUrl and username are required" }, 400);
-  if (!/^https:\/\//i.test(baseUrl)) return c.json({ error: "baseUrl must be https://" }, 400);
+  try {
+    assertAllowedConnectorUrl(baseUrl);
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : "invalid baseUrl" }, 400);
+  }
 
   const existing = await c.env.DB.prepare("SELECT password_enc FROM axl_connections WHERE project_id = ?")
     .bind(projectId)

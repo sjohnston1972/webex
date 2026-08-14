@@ -21,7 +21,10 @@ export function parseCsv(content: string): string[][] {
       } else {
         field += ch;
       }
-    } else if (ch === '"') {
+    } else if (ch === '"' && field === "") {
+      // Only a quote at the START of a field opens a quoted field. A stray quote
+      // mid-field (e.g. a description like `6" display`) is then a literal
+      // character instead of swallowing the rest of the file into one field.
       inQuotes = true;
     } else if (ch === ",") {
       row.push(field);
@@ -91,9 +94,12 @@ function matchHeaders(headers: string[], spec: FieldSpec): Map<string, number> |
 export function detectKind(headers: string[]): CsvKind {
   const lower = headers.map((h) => h.trim().toLowerCase());
   const has = (names: string[]) => names.some((n) => lower.includes(n));
-  if (has(USER_FIELDS.userid)) return "users";
-  if (has(VM_FIELDS.alias)) return "vm_boxes";
+  // Phones first: a Phones export whose owner column is literally "User ID"
+  // would otherwise be misdetected as a Users export (both specs list "user id").
+  // A genuine Users export has no device+model columns, so this is unambiguous.
   if (has(PHONE_FIELDS.device_name) && has(PHONE_FIELDS.model)) return "phones";
+  if (has(VM_FIELDS.alias)) return "vm_boxes";
+  if (has(USER_FIELDS.userid)) return "users";
   if (has(LINE_FIELDS.pattern)) return "lines";
   return "unknown";
 }

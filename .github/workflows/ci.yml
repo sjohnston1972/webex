@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# This tool provisions and deletes objects in customer Webex orgs, so a broken
+# commit must not first surface at deploy time. Everything here runs offline:
+# the vitest pool emulates D1/R2/Queues and no step touches Cloudflare, Webex or
+# CUCM, so CI needs no repository secrets.
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Install worker dependencies
+        run: npm ci
+
+      - name: Install web dependencies
+        run: npm --prefix web ci
+
+      - name: Typecheck worker
+        run: npm run typecheck
+
+      - name: Typecheck web
+        run: npm --prefix web run typecheck
+
+      # Before the tests: wrangler.jsonc points assets at web/dist, and the test
+      # pool reads that config.
+      - name: Build web
+        run: npm run build
+
+      - name: Test
+        run: npm test
